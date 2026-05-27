@@ -1,6 +1,6 @@
 {
   "name": "Claude Drama Triangle Coach",
-  "description": "Two hooks, one trigger. During the call, Claude fires a quiet macOS notification with a one-line reframe when you slip into a Karpman Drama Triangle role (Victim, Persecutor, Rescuer). After transcription completes, a separate observer pass writes a per-teammate analysis with concrete strategies for engaging each person going forward.",
+  "description": "During the call, Claude fires a quiet macOS notification with a one-line reframe when you slip into a Karpman Drama Triangle role (Victim, Persecutor, Rescuer). When the call ends, the same session writes a per-teammate analysis to drama-evaluation.md with concrete strategies for engaging each person going forward.",
   "platforms": ["macos"],
   "language": "bash"
 }
