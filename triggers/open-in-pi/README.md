@@ -6,9 +6,9 @@ The trigger writes an `open-in-pi.command` wrapper next to the live transcript f
 
 ## What makes this one different
 
-Most editor sidekicks can only check the transcript when you speak to them. Pi can extend itself at runtime, so the prompt asks it to **configure its own monitoring**: write a small watcher extension into `.pi/extensions/`, tail `transcriptions.jsonl` and `events.jsonl` from a saved offset, and inject any new lines on every turn via the `before_agent_start` event — surfacing the call as it unfolds while staying responsive to you.
+Most editor sidekicks can only check the transcript when you speak to them. Pi can extend itself at runtime, so the prompt asks it to **configure its own monitoring**: write a small watcher extension into `.pi/extensions/` that tails `transcriptions.jsonl` and `events.jsonl` from a saved offset. New lines surface live in the TUI through `ctx.ui.notify` even while Pi sits idle, and the `before_agent_start` event re-injects them into context so Pi is always caught up the moment it next speaks. You can keep chatting with Pi the whole time — conversing and watching are one continuous activity, so a question never stops the watch.
 
-Pi cannot reload its own extension files, so it writes the watcher and then asks you to run `/reload` once to activate it. If self-extension isn't available or worthwhile in your environment, Pi falls back to per-turn catch-up polling — the same model the other transcription sidekicks use — so the trigger is useful either way. It always treats the transcript files as the source of truth.
+Pi cannot reload its own extension files, so it writes the watcher and then asks you to run `/reload` once to activate it; until you reload, it is honest that it is still on the fallback path. If self-extension isn't available or worthwhile in your environment, Pi falls back to per-turn catch-up polling — the same model the other transcription sidekicks use — so the trigger is useful either way. It always treats the transcript files as the source of truth.
 
 Beyond monitoring, Pi catches up on the existing transcript, responds when addressed by name, logs the conversation as dot-lines, and writes checkpoint/final summaries around transcription and call lifecycle events.
 

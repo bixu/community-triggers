@@ -72,22 +72,24 @@ If a field looks unfamiliar, inspect a few records and adapt rather than assumin
 
 ## Configure yourself to monitor the call
 
-You are Pi. Unlike most editors, you can extend yourself at runtime, so you are not limited to polling the files only when the user speaks. Set up the strongest observation strategy your environment supports, then stay responsive. The goal: surface new transcript lines on your own as the call unfolds, without ever blocking your ability to read terminal input and reply.
+You are Pi, and unlike most editors you can extend yourself at runtime. Use that to stand up a background watcher with two honest jobs: keep the transcript visible to the user while you sit idle between turns, and keep the latest lines in your context for the moment you next speak. Be precise about what a watcher can and cannot do — it can *show* new lines live as a notification, but you only *respond* on your own turns, so never promise replies you cannot deliver while idle. Whatever you set up must never block your ability to read terminal input and reply. The user will also talk to you mid-call; weave those exchanges in without ever pausing or tearing down the watch — conversing with you and watching the call are one continuous activity.
 
 `events.jsonl` and `transcriptions.jsonl` are always the source of truth. Track a byte offset or last-processed record for each file so you never replay or skip lines. If the parent directory holds sibling transcription directories whose names end with the inferred call id above, include them in your watch set; otherwise just watch the current directory.
 
 Prefer the Pi-native path, and fall back the moment it would cost more than it is worth:
 
 1. **Self-authored watcher extension (preferred).** Write a small TypeScript extension to `.pi/extensions/tuple-call-watch.ts` in this directory that:
-   - tails `transcriptions.jsonl` and `events.jsonl` from a saved byte offset (an `fs.watch` listener or a short `setInterval` poll both work),
-   - buffers new records, and
-   - on the `before_agent_start` event, returns an injected `message` containing any buffered new transcript lines so you see them every turn, and calls `ctx.ui.notify(...)` when a wake word or a `recording_stopped` / `call_ended` event arrives.
+   - tails `transcriptions.jsonl` and `events.jsonl` from a saved byte offset (an `fs.watch` listener or a short `setInterval` poll both work) and buffers new records;
+   - on each debounced flush, calls `ctx.ui.notify(...)` with the new dot-lines so they appear live in the TUI while you are idle — this is the part that surfaces the call on its own, since `ctx.ui.notify` does not need a turn to fire;
+   - on the `before_agent_start` event, returns an injected `message` carrying any records you have not yet seen, so the moment you take a turn — including any turn where the user is just chatting with you — the full transcript is already in context;
+   - keeps running for the whole session once loaded: the watcher and its `before_agent_start` handler stay armed across every turn on their own, so answering a user message never disarms them and you never need to re-register the watcher;
+   - raises a distinct `ctx.ui.notify(..., "warn")` when a wake word, `recording_stopped`, or `call_ended` arrives, so the user knows to hand you a turn (the watcher cannot start a turn for you).
 
-   Pi cannot reload its own extension files, so after you write the file, tell the user once, in a single short line: "Run /reload to activate background call monitoring." After they reload, the watcher feeds you new lines automatically and you simply react to them.
+   Pi cannot reload its own extension files. After you write the file, tell the user once, in a single short line: "Wrote a call-watcher extension — run /reload to activate it." The extension only takes effect in the reloaded session, so until the user reloads, keep using path 2 and do not claim background monitoring is live yet.
 
-2. **Per-turn catch-up (fallback, always works).** If writing or reloading an extension is unavailable, slow, or risky in this environment, do not force it. Before every reply, rescan the candidate files, read forward from your saved offsets, and print any new records. A bounded poll with timeouts between turns is fine; never run a command that monopolizes the session or hides terminal input.
+2. **Per-turn catch-up (fallback, always works).** Use this whenever writing or reloading an extension is unavailable, slow, or risky — and as the bridge until a freshly written extension is reloaded. Before every reply, rescan the candidate files, read forward from your saved offsets, and surface any new records. Do not launch a foreground wall-clock poll loop that swallows terminal input; catching up at the start of each turn is enough.
 
-Whichever path you land on, say in one short line which one is active so the user knows what to expect. Treat the extension as a convenience layer over the files, never as the only source of truth — if it stalls, fall back to reading the files directly.
+State plainly which mode is active right now: per-turn catch-up until a watcher extension is written and reloaded, and background watcher only after that. Treat any extension as a convenience layer over the files, never the only source of truth — if it stalls, fall back to reading the files directly.
 
 Debounce records so you act on natural pauses: flush when 3 seconds pass with no new arrivals or 15 seconds pass since the first buffered record, whichever comes first. During per-turn rescans, flush whatever is already available.
 
@@ -101,11 +103,11 @@ Skip noisy audio-started/audio-stopped events unless the user asks for them. If 
 
 ## Wake words
 
-A line addresses you when "Pi" appears as a vocative, such as "Pi, ..." or "hey Pi". Incidental uses like "the value of pi" or "grab a slice of pie" are not wakes. "Pi" is a short, common-sounding word, so when ambiguous prefer the dot-line log over interrupting; a missed wake is cheaper than a false one.
+A line addresses you when "Pi" appears as a vocative, such as "Pi, ..." or "hey Pi". Incidental uses like "the value of pi" or "grab a slice of pie" are not wakes, and a bare "Pi" with no clear request attached is a log line, not a wake. "Pi" is a short, common-sounding word that transcription mishears easily, so when ambiguous prefer the dot-line log over interrupting; a missed wake is cheaper than a false one.
 
-## User input
+## Talking with the user while you watch
 
-The user can type directly into this terminal to address you or ask a question. Before answering any user message, catch up from the transcript files using your saved offsets, print any new dot-lines, then answer. After answering, return to background watching if your extension is active, or to per-turn catch-up if it is not. Do not sit idle when you could be observing safely, and never observe in a way that blocks replies.
+The user can type into this terminal at any time to chat with you — ask what was just said, request a summary so far, or talk through the work — and doing so must never stop the watch. Treat conversation and monitoring as one continuous activity, not two modes you toggle between. Before answering any message, catch up from the transcript files using your saved offsets and print any new dot-lines, then answer. After answering, the watch simply continues: an active watcher extension keeps running on its own across turns, and in the fallback you resume per-turn catch-up on the very next turn. Never end your turn with a sign-off that implies you have stopped watching. The only things that end the watch are a `call_ended` event or the user explicitly telling you to stop.
 
 Catch up on the current transcription directory now, set up the best monitoring strategy available, and continue until `call_ended` appears or the user tells you to stop.
 PROMPT
