@@ -1,0 +1,6 @@
+{
+  "name": "Pi Transcript Summary",
+  "description": "Launches Pi when Tuple transcription completes and asks it to summarize the completed transcript.",
+  "platforms": ["macos"],
+  "language": "bash"
+}
