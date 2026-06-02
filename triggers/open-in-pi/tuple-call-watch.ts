@@ -6,10 +6,11 @@
 // Unlike a passive transcript viewer, this makes Pi an active listener. It tails
 // the live transcript and, whenever the talkers pause, feeds the new lines to Pi
 // as a message that *triggers a turn* (`pi.sendMessage(..., { triggerTurn: true })`).
-// Pi consumes each batch and — per its prompt — stays silent unless something is
-// worth interjecting. Turns are only triggered while Pi is idle and no earlier
-// triggered turn is still pending, so the user's own messages always take
-// priority: Pi answers you, then resumes consuming the call.
+// Pi consumes each batch and — per its prompt — leaves a one-line acknowledgment
+// of what it's tracking, escalating to a real interjection only when it matters.
+// Turns are only triggered while Pi is idle and no earlier triggered turn is
+// still pending, so the user's own messages always take priority: Pi answers
+// you, then resumes consuming the call.
 //
 // The trigger writes `tuple-call-watch.config.json` next to this file with the
 // artifacts directory and call id. Absent that, the extension watches the current
@@ -220,7 +221,7 @@ export default function (pi: ExtensionAPI) {
           `New on the call:\n\n${batch}\n\n` +
           (urgent
             ? "This includes a line addressed to you or a recording_stopped/call_ended event — respond per your instructions."
-            : "Leave a one-line `·` acknowledgment naming what's being discussed; escalate to `⚠` only if something matters."),
+            : "Leave a one-line `·` acknowledgment naming what's being discussed; escalate to `👋` only if something matters."),
         display: false,
       },
       { triggerTurn: true },

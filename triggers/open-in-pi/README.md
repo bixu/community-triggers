@@ -6,13 +6,13 @@ The trigger writes an `open-in-pi.command` wrapper next to the live transcript f
 
 ## What makes this one different
 
-Most editor sidekicks can only check the transcript when you speak to them. This one makes Pi an **active listener**: it consumes the call as it happens and only interjects when something is worth saying.
+Most editor sidekicks can only check the transcript when you speak to them. This one makes Pi an **active listener**: it consumes the call as it happens, drops a light one-line acknowledgment so you can see it following along, and interjects with substance only when something is worth saying.
 
-The trigger ships a Pi extension — `tuple-call-watch.ts` — and installs it into the call's `.pi/extensions/` directory, where Pi loads it automatically at startup. **No `/reload`, nothing to configure.** The extension tails the live transcript and, whenever the talkers pause, feeds the new lines to Pi with `pi.sendMessage(..., { triggerTurn: true })` — which actually starts a turn, so Pi *reads and reasons over* each batch rather than waiting to be asked. Guided by its prompt, Pi leaves a one-line `·` acknowledgment naming the thread it's tracking on every batch (so you can see it following along live) and escalates to a `⚠` interjection only when something matters: a risk or bug, a decision worth capturing, an action item, a correction, or a line addressed to it directly.
+The trigger ships a Pi extension — `tuple-call-watch.ts` — and installs it into the call's `.pi/extensions/` directory, where Pi loads it automatically at startup. **No `/reload`, nothing to configure.** The extension tails the live transcript and, whenever the talkers pause, feeds the new lines to Pi with `pi.sendMessage(..., { triggerTurn: true })` — which actually starts a turn, so Pi *reads and reasons over* each batch rather than waiting to be asked. Guided by its prompt, Pi leaves a one-line `·` acknowledgment naming the thread it's tracking on every batch (so you can see it following along live) and escalates to a `👋` interjection only when something matters: a risk or bug, a decision worth capturing, an action item, a correction, or a line addressed to it directly.
 
 Crucially, the watcher only triggers a turn while Pi is idle, so **your own messages always take priority** — when you talk to Pi it answers you first, and the instant it finishes the next batch of call activity arrives and it keeps listening. The poll loop lives for the whole session: a question from you never pauses or ends the watch, and batches keep coming until the call ends. The transcript files remain the source of truth — if the watcher ever stalls, Pi just reads `transcriptions.jsonl` and `events.jsonl` directly.
 
-Pi opens with a one-line "listening and caught up" confirmation, then goes quiet, and writes checkpoint and final summaries around `recording_stopped` and `call_ended`.
+Pi opens with a one-line "listening and caught up" confirmation, leaves a quick `·` ack on each batch thereafter, and writes checkpoint and final summaries around `recording_stopped` and `call_ended`.
 
 ## Prerequisites
 
