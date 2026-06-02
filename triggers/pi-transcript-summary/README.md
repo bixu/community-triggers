@@ -2,7 +2,7 @@
 
 Launches [Pi](https://pi.dev/) when Tuple transcription completes and asks it to summarize the completed transcript.
 
-The trigger writes a `summarize-in-pi.command` wrapper next to the transcript files and asks macOS to open it. The wrapper runs as `#!/bin/zsh -li`, so `pi` is resolved from the same interactive shell environment you get in a new terminal. No install location or model is hard-coded — Pi uses whichever provider and model you have configured as your default.
+The trigger writes a `summarize-in-pi.command` wrapper next to the transcript files and asks macOS to open it. The wrapper runs as `#!/bin/zsh -li`, so `pi` resolves from the same interactive shell environment you get in a new terminal. Nothing is hard-coded: Pi uses whichever provider and model you have configured as your default.
 
 Pi starts in the transcription directory with a focused summary prompt. It reads `events.jsonl` and `transcriptions.jsonl`, produces a concise summary with decisions, action items, and open questions, then stays available for transcript-backed follow-up questions.
 
