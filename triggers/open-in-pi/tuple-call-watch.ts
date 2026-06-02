@@ -3,17 +3,16 @@
 // Loaded automatically from `.pi/extensions/` in the transcription directory, so
 // it is active the moment Pi starts — no /reload, no self-authoring required.
 //
-// What it does:
-//   - tails `transcriptions.jsonl` and `events.jsonl` (plus sibling directories
-//     for the same call) from saved byte offsets,
-//   - surfaces new lines live in the TUI via `ctx.ui.notify` while Pi is idle,
-//   - re-injects everything Pi has not yet seen on `before_agent_start`, so the
-//     full transcript is already in context the moment Pi takes a turn — even a
-//     turn where the user is just chatting.
+// Unlike a passive transcript viewer, this makes Pi an active listener. It tails
+// the live transcript and, whenever the talkers pause, feeds the new lines to Pi
+// as a message that *triggers a turn* (`pi.sendMessage(..., { triggerTurn: true })`).
+// Pi consumes each batch and — per its prompt — stays silent unless something is
+// worth interjecting. Turns are only triggered while Pi is idle, so the user's own
+// messages always take priority: Pi answers you, then resumes consuming the call.
 //
 // The trigger writes `tuple-call-watch.config.json` next to this file with the
-// artifacts directory and call id. Absent that, the extension watches the
-// current working directory.
+// artifacts directory and call id. Absent that, the extension watches the current
+// working directory.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import fs from "node:fs";
@@ -21,7 +20,9 @@ import path from "node:path";
 
 type SpeakerMap = Record<string, string>;
 
-const POLL_MS = 1500;
+const POLL_MS = 1500; // how often to check the files for new lines
+const QUIET_MS = 3500; // a pause this long flushes the buffered batch to Pi
+const MAX_WAIT_MS = 20000; // force a flush during long continuous talking
 const SKIP_EVENT_CATEGORIES = new Set(["user_audio_started", "user_audio_stopped"]);
 
 function readConfig(cwd: string): { artifactsDir: string; callId: string } {
@@ -83,8 +84,15 @@ export default function (pi: ExtensionAPI) {
   const { artifactsDir, callId } = readConfig(cwd);
   const speakers: SpeakerMap = {};
   const offsets: Record<string, number> = {};
-  const pending: string[] = [];
-  let alerts = 0;
+
+  const backlog: string[] = []; // lines from before Pi started — context only
+  let backlogDelivered = false;
+
+  const buffer: string[] = []; // new lines since startup, awaiting a flush to Pi
+  let firstBufferedAt = 0;
+  let lastArrivalAt = 0;
+  let bufferFlagged = false; // batch contains a wake word or stop/end event
+
   let timer: ReturnType<typeof setInterval> | undefined;
 
   function resolveSpeaker(userId: unknown): string {
@@ -92,34 +100,32 @@ export default function (pi: ExtensionAPI) {
     return speakers[id] || id || "unknown";
   }
 
-  function ingestEvent(rec: any): string | null {
-    const category = String(rec.category ?? "");
-    if (rec.user && (category === "user_joined" || category === "participant_joined")) {
-      const name = typeof rec.message === "string" ? rec.message.replace(/\s+(joined|connected).*$/i, "").trim() : "";
-      if (name) speakers[String(rec.user)] = name;
+  function format(file: string, rec: any): { line: string; flag: boolean } | null {
+    if (file.endsWith("events.jsonl")) {
+      const category = String(rec.category ?? "");
+      if (rec.user && (category === "user_joined" || category === "participant_joined")) {
+        const name = typeof rec.message === "string" ? rec.message.replace(/\s+(joined|connected).*$/i, "").trim() : "";
+        if (name) speakers[String(rec.user)] = name;
+      }
+      if (SKIP_EVENT_CATEGORIES.has(category)) return null;
+      const flag = category === "recording_stopped" || category === "call_ended";
+      return { line: `- ${hms(rec.time)} event: ${category}${rec.message ? ` (${rec.message})` : ""}`, flag };
     }
-    if (SKIP_EVENT_CATEGORIES.has(category)) return null;
-    if (category === "recording_stopped" || category === "call_ended") alerts++;
-    return `- ${hms(rec.time)} event: ${category}${rec.message ? ` (${rec.message})` : ""}`;
-  }
-
-  function ingestTranscript(rec: any): string {
     const text = String(rec.text ?? "");
-    if (isWake(text)) alerts++;
-    return `- ${hms(rec.start)} ${resolveSpeaker(rec.user_id)}: ${text}`;
+    return { line: `- ${hms(rec.start)} ${resolveSpeaker(rec.user_id)}: ${text}`, flag: isWake(text) };
   }
 
-  function scanFile(file: string) {
+  function scanFile(file: string, sink: string[]): boolean {
     let stat: fs.Stats;
     try {
       stat = fs.statSync(file);
     } catch {
-      return; // file not created yet
+      return false; // not created yet
     }
     const from = offsets[file] ?? 0;
     if (stat.size <= from) {
       offsets[file] = stat.size; // handle truncation/rotation
-      return;
+      return false;
     }
     let chunk = "";
     try {
@@ -129,73 +135,107 @@ export default function (pi: ExtensionAPI) {
       fs.closeSync(fd);
       chunk = buf.toString("utf8");
     } catch {
-      return;
+      return false;
     }
-    offsets[file] = stat.size;
-    const isEvents = file.endsWith("events.jsonl");
-    for (const line of chunk.split("\n")) {
+    // Only advance the offset past whole lines, so a half-written final line is
+    // re-read in full next pass.
+    const lastNl = chunk.lastIndexOf("\n");
+    if (lastNl === -1) return false;
+    offsets[file] = from + Buffer.byteLength(chunk.slice(0, lastNl + 1), "utf8");
+    let added = false;
+    for (const line of chunk.slice(0, lastNl).split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
-        const rec = JSON.parse(trimmed);
-        const formatted = isEvents ? ingestEvent(rec) : ingestTranscript(rec);
-        if (formatted) pending.push(formatted);
+        const formatted = format(file, JSON.parse(trimmed));
+        if (formatted) {
+          sink.push(formatted.line);
+          if (formatted.flag) bufferFlagged = true;
+          added = true;
+        }
       } catch {
-        // partial final line — its bytes are excluded from the offset next pass
+        // skip an unparseable line
       }
     }
+    return added;
   }
 
-  function scan() {
+  function scan(sink: string[]): boolean {
+    let added = false;
     for (const dir of watchDirs(artifactsDir, callId)) {
-      scanFile(path.join(dir, "events.jsonl"));
-      scanFile(path.join(dir, "transcriptions.jsonl"));
+      // events first so a speaker join is mapped before the transcript line lands
+      if (scanFile(path.join(dir, "events.jsonl"), sink)) added = true;
+      if (scanFile(path.join(dir, "transcriptions.jsonl"), sink)) added = true;
     }
+    return added;
   }
 
-  function poll(ctx: any) {
-    const before = pending.length;
-    const beforeAlerts = alerts;
-    scan();
-    if (!ctx?.hasUI) return;
-    const fresh = pending.slice(before);
-    if (fresh.length) ctx.ui.notify(fresh.join("\n"), alerts > beforeAlerts ? "warn" : "info");
+  function maybeFlush(ctx: any) {
+    if (!buffer.length) return;
+    // Only ever trigger a turn when Pi is free, so the user's own messages and
+    // any in-progress reply always take priority over consuming the call.
+    if (typeof ctx?.isIdle === "function" && !ctx.isIdle()) return;
+    if (typeof ctx?.hasPendingMessages === "function" && ctx.hasPendingMessages()) return;
+    const now = Date.now();
+    const paused = now - lastArrivalAt >= QUIET_MS;
+    const overdue = firstBufferedAt > 0 && now - firstBufferedAt >= MAX_WAIT_MS;
+    if (!paused && !overdue) return; // still mid-thought — keep buffering
+
+    const batch = buffer.splice(0, buffer.length).join("\n");
+    const flagged = bufferFlagged;
+    firstBufferedAt = 0;
+    bufferFlagged = false;
+    pi.sendMessage(
+      {
+        customType: "tuple-call-watch",
+        content:
+          `New on the call:\n\n${batch}\n\n` +
+          (flagged
+            ? "This includes a line addressed to you or a recording_stopped/call_ended event — act per your instructions."
+            : "Interject only if something here is worth it; otherwise reply with no text."),
+        display: false,
+      },
+      { triggerTurn: true },
+    );
   }
 
   pi.on("session_start", async (_event: any, ctx: any) => {
     try {
-      scan(); // catch up on everything written before Pi started
+      scan(backlog); // capture the call so far as context; offsets advance to end
+      bufferFlagged = false; // backlog flags are not live alerts
       if (ctx?.hasUI) {
         ctx.ui.notify(
-          `Tuple call watcher active — monitoring ${path.basename(artifactsDir)}${callId ? ` (call ${callId})` : ""}.`,
+          `Listening to the call${callId ? ` (${callId})` : ""} — I'll chime in when it matters.`,
           "info",
         );
       }
-      timer = setInterval(() => poll(ctx), POLL_MS);
-      timer.unref?.(); // never keep the process alive on the watcher's account
+      timer = setInterval(() => {
+        try {
+          if (scan(buffer)) {
+            const now = Date.now();
+            if (!firstBufferedAt) firstBufferedAt = now;
+            lastArrivalAt = now;
+          }
+          maybeFlush(ctx);
+        } catch {
+          // a single bad tick must not kill the watcher
+        }
+      }, POLL_MS);
+      timer.unref?.();
     } catch {
       // a watcher hiccup must never take down the session
     }
   });
 
-  // Hand Pi everything it has not yet seen at the start of each turn, so a reply
-  // — including a turn where the user is just chatting — is always fully caught up.
-  // This message is context only: how to react lives in the sidekick prompt, so
-  // nothing here ever tells Pi to stay silent.
+  // Deliver the pre-start backlog once, as grounding context for Pi's first turn.
   pi.on("before_agent_start", async () => {
-    scan();
-    if (!pending.length) return undefined;
-    const batch = pending.splice(0, pending.length).join("\n");
-    const flagged = alerts > 0;
-    alerts = 0;
+    if (backlogDelivered || !backlog.length) return undefined;
+    backlogDelivered = true;
+    const history = backlog.splice(0, backlog.length).join("\n");
     return {
       message: {
         customType: "tuple-call-watch",
-        content:
-          `New Tuple call activity the user has already seen live (use as context for your reply):\n\n${batch}` +
-          (flagged
-            ? "\n\nThis batch includes a wake word or a recording_stopped/call_ended event."
-            : ""),
+        content: `The call so far, for context — do not comment on it retroactively:\n\n${history}`,
         display: false,
       },
     };

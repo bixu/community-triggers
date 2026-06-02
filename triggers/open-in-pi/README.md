@@ -6,11 +6,13 @@ The trigger writes an `open-in-pi.command` wrapper next to the live transcript f
 
 ## What makes this one different
 
-Most editor sidekicks can only check the transcript when you speak to them. This trigger ships a Pi extension — `tuple-call-watch.ts` — and installs it into the call's `.pi/extensions/` directory, where Pi loads it automatically at startup. **No `/reload`, nothing to configure.** Pi's extension API makes this possible: the watcher uses `ctx.ui.notify` to post new transcript lines to the TUI live (with speaker names resolved) even while Pi sits idle, and the `before_agent_start` event to inject everything new — plus the full backlog from before Pi started — into context at the start of each turn. So the call shows in the terminal as it happens, and the moment you talk to Pi it already has the whole conversation.
+Most editor sidekicks can only check the transcript when you speak to them. This one makes Pi an **active listener**: it consumes the call as it happens and only interjects when something is worth saying.
 
-Because the watcher runs independently of Pi's turns and stays armed for the whole session, you can keep chatting with Pi the entire call — conversing and watching are one continuous activity, so a question never pauses or stops the watch. The transcript files remain the source of truth: if the watcher ever stalls, Pi just reads `transcriptions.jsonl` and `events.jsonl` directly.
+The trigger ships a Pi extension — `tuple-call-watch.ts` — and installs it into the call's `.pi/extensions/` directory, where Pi loads it automatically at startup. **No `/reload`, nothing to configure.** The extension tails the live transcript and, whenever the talkers pause, feeds the new lines to Pi with `pi.sendMessage(..., { triggerTurn: true })` — which actually starts a turn, so Pi *reads and reasons over* each batch rather than waiting to be asked. Guided by its prompt, Pi stays silent on routine back-and-forth and speaks up only for things that matter: a risk or bug, a decision worth capturing, an action item, a correction, or a line addressed to it directly.
 
-Pi responds when addressed by name ("Pi, …"), and writes checkpoint and final summaries around `recording_stopped` and `call_ended`.
+Crucially, the watcher only triggers a turn while Pi is idle, so **your own messages always take priority** — when you talk to Pi it answers you first, and the instant it finishes the next batch of call activity arrives and it keeps listening. The poll loop lives for the whole session: a question from you never pauses or ends the watch, and batches keep coming until the call ends. The transcript files remain the source of truth — if the watcher ever stalls, Pi just reads `transcriptions.jsonl` and `events.jsonl` directly.
+
+Pi opens with a one-line "listening and caught up" confirmation, then goes quiet, and writes checkpoint and final summaries around `recording_stopped` and `call_ended`.
 
 ## Prerequisites
 
@@ -36,6 +38,6 @@ When `call-transcription-started` fires, Tuple provides `TUPLE_TRIGGER_CALL_ARTI
 4. Opens the wrapper through macOS with `/usr/bin/open`.
 5. The wrapper starts a login interactive zsh shell, changes into the transcription directory, and runs `pi "$(cat pi-sidekick-prompt.md)"`. Pi auto-discovers `.pi/extensions/*.ts` from that directory, so the watcher is active immediately.
 
-The watcher (`tuple-call-watch.ts`) tails `transcriptions.jsonl` and `events.jsonl` (plus sibling directories for the same call) from saved byte offsets, resolves `user_id` to speaker names, and degrades safely: if its config is missing it watches the working directory, and any error is swallowed rather than taking down the session.
+The watcher (`tuple-call-watch.ts`) tails `transcriptions.jsonl` and `events.jsonl` (plus sibling directories for the same call) from saved byte offsets, resolves `user_id` to speaker names, and batches new lines on natural pauses (a ~3.5s lull, or every ~20s during continuous talking). It only feeds a batch — and only triggers a turn — while Pi is idle and has no pending messages, so consumption never collides with your messages or with itself. It degrades safely: if its config is missing it watches the working directory, and any error is swallowed rather than taking down the session.
 
 For local script testing without opening a terminal, set `OPEN_IN_PI_DRY_RUN=1` — it still installs the extension so you can inspect it.
