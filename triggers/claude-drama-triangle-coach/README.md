@@ -48,7 +48,7 @@ When the call genuinely ends (it ignores mid-call transcription toggles), the sa
 
 ## Prerequisites
 
-- **macOS.** Uses `open` / `Ghostty.app` and `osascript` for notifications. Optionally `terminal-notifier` for click-to-open.
+- **macOS.** Opens your preferred terminal — Ghostty, iTerm, Alacritty, or Terminal (set `PREFERRED_TERM` to choose) — and uses `osascript` for notifications. Optionally `terminal-notifier` for click-to-open.
 - **Claude Code**: `npm install -g @anthropic-ai/claude-code`
 - **The `tuple` CLI**, which ships with Tuple.
 - **A Whisper model** configured in Tuple for live transcription. Email `support@tuple.app` if you need local transcription enabled for your team.
@@ -72,7 +72,7 @@ When `call-transcription-started` fires:
 1. Detects which Tuple environment (`prod`, `staging`, `dev`) owns the call by probing each daemon's `state` for a matching call ID, and exports `TUPLE_ENV` so every `tuple` CLI call inside Claude scopes to the right daemon.
 2. Copies `system-prompt.md` into the call's artifact directory. If you have `~/.tuple/identity.md` (or the staging equivalent), it's appended so Claude knows whose voice to coach, though the trigger works fine without it.
 3. Inlines the last 100 lifecycle events and last 100 transcript lines into the initial prompt so Claude has context if it joins mid-call.
-4. Opens a terminal (Ghostty if installed, otherwise the system `.command` handler) running Claude Code inside the call's artifact directory.
+4. Opens your preferred terminal (Ghostty → iTerm → Alacritty → Terminal; override with `PREFERRED_TERM`) running Claude Code inside the call's artifact directory.
 
 The session stays subscribed to the transcription stream for the life of the call, coaching your lines in real time. If transcription stops and restarts mid-call, the trigger sees the live PID file and exits; the existing session's subscription picks up the resumed stream without restarting. When the stream reports the call is genuinely over (an `HTTP 410 Gone` on the transcript endpoint), the session reads the full transcript from disk, writes `drama-evaluation.md` in the call root, and fires the "analysis ready" notification.
 

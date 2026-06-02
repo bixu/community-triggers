@@ -37,7 +37,11 @@ fi
 
 PID_FILE="${TRANSCRIPTION_DIR}/pi-summary.pid"
 PROMPT_FILE="${TRANSCRIPTION_DIR}/pi-summary-prompt.md"
-COMMAND_FILE="${TRANSCRIPTION_DIR}/summarize-in-pi.command"
+# Set your preferred terminal here, or leave empty to auto-detect.
+# One of: ghostty | iterm | alacritty | terminal
+# (Also overridable from the environment: PREFERRED_TERM=iterm)
+PREFERRED_TERM="${PREFERRED_TERM:-}"
+COMMAND_FILE="${TRANSCRIPTION_DIR}/summarize-in-pi.sh"
 
 if [ -f "${PID_FILE}" ] && kill -0 "$(cat "${PID_FILE}" 2>/dev/null)" 2>/dev/null; then
     echo "pi-transcript-summary: Pi summary already running for ${TRANSCRIPTION_DIR}"
@@ -135,9 +139,71 @@ SCRIPT
 
 chmod 0755 "${COMMAND_FILE}"
 
+# --- launch_in_terminal: open the user's preferred terminal directly --------
+# Opens the given executable script in the user's terminal. No .command file or
+# LaunchServices default handler: it invokes the terminal binary directly (or
+# osascript for Terminal/iTerm). The script's `#!/bin/zsh -li` shebang loads the
+# user's profile, like a double-clicked .command. Selection order: $PREFERRED_TERM,
+# then the first installed of ghostty / iterm / alacritty / terminal.
+launch_in_terminal() {
+    local script="$1"
+    local choice="${PREFERRED_TERM:-}"
+    local order=(ghostty iterm alacritty terminal)
+    local t
+
+    _term_installed() {
+        case "$1" in
+        ghostty) [ -x "/Applications/Ghostty.app/Contents/MacOS/ghostty" ] ;;
+        iterm) [ -d "/Applications/iTerm.app" ] ;;
+        alacritty) [ -x "/Applications/Alacritty.app/Contents/MacOS/alacritty" ] ;;
+        terminal) true ;;
+        *) return 1 ;;
+        esac
+    }
+
+    if [ -n "$choice" ] && ! _term_installed "$choice"; then
+        echo "launch_in_terminal: PREFERRED_TERM='$choice' not installed; auto-detecting" >&2
+        choice=""
+    fi
+    if [ -z "$choice" ]; then
+        for t in "${order[@]}"; do
+            if _term_installed "$t"; then choice="$t"; break; fi
+        done
+    fi
+    [ -z "$choice" ] && choice="terminal"
+
+    case "$choice" in
+    ghostty) "/Applications/Ghostty.app/Contents/MacOS/ghostty" -e "$script" & ;;
+    alacritty) "/Applications/Alacritty.app/Contents/MacOS/alacritty" -e "$script" & ;;
+    iterm)
+        osascript - "$script" <<'OSA'
+on run argv
+    set scriptPath to item 1 of argv
+    tell application "iTerm"
+        activate
+        set newWindow to (create window with default profile)
+        tell current session of newWindow to write text (quoted form of scriptPath)
+    end tell
+end run
+OSA
+        ;;
+    terminal | *)
+        osascript - "$script" <<'OSA'
+on run argv
+    set scriptPath to item 1 of argv
+    tell application "Terminal"
+        activate
+        do script (quoted form of scriptPath)
+    end tell
+end run
+OSA
+        ;;
+    esac
+}
+
 if [ "${PI_TRANSCRIPT_SUMMARY_DRY_RUN:-}" = "1" ]; then
     echo "pi-transcript-summary: dry run generated ${COMMAND_FILE}"
     exit 0
 fi
 
-/usr/bin/open "${COMMAND_FILE}" &
+launch_in_terminal "${COMMAND_FILE}"

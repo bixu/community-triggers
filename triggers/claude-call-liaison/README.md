@@ -33,7 +33,7 @@ When any gate trips, Claude switches to silent mode for the rest of the call, ev
 
 ## Prerequisites
 
-- **macOS.** The trigger uses `open` and `Ghostty.app` (with fallback to the default `.command` handler).
+- **macOS.** Opens your preferred terminal — Ghostty, iTerm, Alacritty, or Terminal (set `PREFERRED_TERM` to choose).
 - **Claude Code**: `npm install -g @anthropic-ai/claude-code`
 - **The `tuple` CLI**, which ships with Tuple.
 - **A Whisper model** configured in Tuple for live transcription. Email `support@tuple.app` if you need local recording enabled for your team.
@@ -124,7 +124,7 @@ When `call-transcription-started` fires:
 1. Detects which Tuple environment (`prod`, `staging`, `dev`) owns the call by probing each daemon's `state` for a matching call ID, and exports `TUPLE_ENV` so every `tuple` CLI call inside Claude scopes to the right daemon.
 2. Copies `system-prompt.md` into the call's artifact directory, then appends your `identity.md` and `context.md` so Claude has personal grounding and the wiring diagram before it starts.
 3. Inlines the last 100 lifecycle events and 100 transcript lines into an initial prompt so Claude has context if it joins mid-call.
-4. Opens a terminal (Ghostty if installed, otherwise the system `.command` handler) running Claude Code inside the call's artifact directory.
+4. Opens your preferred terminal (Ghostty → iTerm → Alacritty → Terminal; override with `PREFERRED_TERM`) running Claude Code inside the call's artifact directory.
 
 Once running, Claude subscribes to `tuple transcription stream -f --interval=30s` so events and transcript share a single wake source. It maps participants once via `tuple state`, captures the shared screen on `screen_share_started`, and re-captures every ~30s while sharing is active.
 

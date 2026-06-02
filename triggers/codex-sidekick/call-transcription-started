@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Set your preferred terminal here, or leave empty to auto-detect.
+# One of: ghostty | iterm | alacritty | terminal
+# (Also overridable from the environment: PREFERRED_TERM=iterm)
+# ---------------------------------------------------------------------------
+PREFERRED_TERM="${PREFERRED_TERM:-}"
+
+LOG=/tmp/tuple-trigger-debug.log
+{
+    printf '\n=== %s call-transcription-started fired (codex-sidekick) ===\n' "$(date -u +%FT%TZ)"
+    printf 'cwd=%s pid=%s ppid=%s\n' "$(pwd)" "$$" "$PPID"
+} >> "$LOG" 2>&1
+trap 'printf "exit status=%s on line %s\n" "$?" "$LINENO" >> "$LOG"' EXIT
+exec >>"$LOG" 2>&1
+
+if [ -z "${TUPLE_TRIGGER_CALL_ARTIFACTS_DIRECTORY:-}" ]; then
+    echo "codex-sidekick: TUPLE_TRIGGER_CALL_ARTIFACTS_DIRECTORY was not set" >&2
+    exit 1
+fi
+
+TRANSCRIPTION_DIR="${TUPLE_TRIGGER_CALL_ARTIFACTS_DIRECTORY}"
+if [ ! -d "${TRANSCRIPTION_DIR}" ]; then
+    echo "codex-sidekick: transcription directory does not exist: ${TRANSCRIPTION_DIR}" >&2
+    exit 1
+fi
+
+SESSION_DIR="$(basename "${TRANSCRIPTION_DIR}")"
+PARENT_DIR="$(dirname "${TRANSCRIPTION_DIR}")"
+PARENT_NAME="$(basename "${PARENT_DIR}")"
+if [[ "${SESSION_DIR}" == *"@"* ]]; then
+    CALL_ID="${SESSION_DIR##*@}"
+elif [[ "${PARENT_NAME}" =~ ^[0-9A-Fa-f-]{8,}$ ]]; then
+    CALL_ID="${PARENT_NAME}"
+else
+    CALL_ID="${SESSION_DIR}"
+fi
+
+PID_FILE="${TRANSCRIPTION_DIR}/codex-sidekick.pid"
+PROMPT_FILE="${TRANSCRIPTION_DIR}/codex-sidekick-prompt.md"
+LAUNCHER_FILE="${TRANSCRIPTION_DIR}/launch-codex-sidekick.sh"
+
+if [ -f "${PID_FILE}" ] && kill -0 "$(cat "${PID_FILE}" 2>/dev/null)" 2>/dev/null; then
+    echo "codex-sidekick: Codex sidekick already running for ${TRANSCRIPTION_DIR}"
+    exit 0
+fi
+
+{
+    cat <<'PROMPT'
+You are a real-time companion on a live Tuple pair-programming call, running inside Codex. Your working directory is the active Tuple transcription session directory for this call, holding `events.jsonl` and `transcriptions.jsonl` (one JSON record per line).
+
+PROMPT
+    printf 'The trigger fired for:\n\n'
+    printf -- '- Transcription directory: %s\n' "${TRANSCRIPTION_DIR}"
+    printf -- '- Session directory name: %s\n' "${SESSION_DIR}"
+    printf -- '- Inferred call id: %s\n' "${CALL_ID}"
+    cat <<'PROMPT'
+
+Transcription can stop and restart mid-call; each restart creates a sibling session directory next to this one whose name ends `@<call-id>`. So this call's full session set is this directory plus every sibling matching `../*@<call-id>/` — plan for it to grow. Other directories under the parent are prior calls, available if the user asks about earlier discussions, but the active transcription is your focus.
+
+You interact with one human: the user at this terminal. Other call participants do not see your output. You have only shell tooling: file reads for the JSONL backlog and a foreground file watcher to follow new records. You have no event-driven wake mechanism — to stay live you must keep a foreground watch occupying this turn. The instant this turn ends, the live watch ends with it, so do not end your turn, and do not daemonize, detach, or background the watcher.
+
+## Catch up first
+
+Before starting the live watch, read this session's `transcriptions.jsonl` and `events.jsonl` in full to catch up on everything said before you joined. A `tail -f`-style watcher only surfaces lines appended *after* it attaches, so this initial full read is the only way to recover the call so far. If a file is missing because transcription just started, say so briefly and continue.
+
+## File schemas
+
+| File                   | Fields                            | Notes                                                                                                                              |
+| ---------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `events.jsonl`         | `category, message, time, user?`  | Categories: `recording_started`, `recording_stopped`, `user_joined`, `user_left`, `user_audio_started`, `user_audio_stopped`, `call_ended`. |
+| `transcriptions.jsonl` | `start, end, text, user_id`       | Resolve `user_id` to a name via `user_joined` events.                                                                              |
+
+If a field looks unfamiliar, read a few lines to confirm shape first.
+
+## Watcher
+
+After catching up, start a live foreground watch over both files across every session directory of this call — this directory and any sibling matching `../*@<call-id>/`, existing or appearing later. Stay attached in the foreground for the rest of the call; never detach, background, or end your turn — a detached or ended watch stops surfacing data.
+
+`tail -f` is the lightweight model, but plain `tail -f`/`-F` won't discover the new session dirs a mid-call transcription restart creates. So run a foreground loop instead: every ~1s, re-glob this directory and `../*@<call-id>/` for `events.jsonl` and `transcriptions.jsonl`, and for each file read forward from a tracked per-file byte offset. Print a one-line confirmation when the watch starts, then keep looping.
+
+Debounce inside the loop so you act on natural pauses. Buffer new records and flush as one batch when either 3 seconds pass with no new arrivals, or 15 seconds pass since the first buffered record — whichever comes first. The 3s window lets a speaker finish a thought; the 15s cap keeps you from drifting behind during continuous speech.
+
+## Handling each batch
+
+Whenever a batch flushes, log every transcription record and interesting events (especially user joined/left, but NOT user started/stopped sending audio) as a dot-line:
+
+    · HH:MM:SS <speaker_or_event>: <text-or-category>
+
+If a record addresses you by name (see Wake words), also respond conversationally to that turn — the other records in the batch still get their dot-line. On `recording_stopped`, add a checkpoint summary. On `call_ended`, write a final summary, after which you may stop the watch and end your turn. Summaries are bulleted decisions, action items (with owner when named), and open threads. No preamble.
+
+## Wake words
+
+A line addresses you when "Codex" appears as a vocative — at the start of an utterance ("Codex, ..."), after a greeting ("hey Codex"), or as a direct question ("Codex, can you ..."). Incidental mentions like "Codex is great" aren't wakes. When ambiguous, prefer the dot-line log; a missed wake is cheaper than a false one. Respond to the addressed turn only.
+
+## Terminal input never stops the watch
+
+The user can type directly into this terminal — to address you or ask a question. Because your watcher is a foreground loop, check for typed input once per loop iteration (between rescans) rather than blocking on it. Treat any message as one event among many: reply, then immediately resume the loop. Don't sit idle waiting for the next user line, and don't let handling input end your turn — the call is still happening even when the user is typing.
+
+Catch up on the active session, then start the foreground watch loop and keep it running — do not end your turn until `call_ended` (or the user tells you to stop).
+PROMPT
+} > "${PROMPT_FILE}"
+
+cat > "${LAUNCHER_FILE}" <<'SCRIPT'
+#!/bin/zsh -li
+printf '\e]0;Tuple Codex Sidekick\a'
+clear
+echo 'Starting Codex sidekick…'
+echo
+
+SCRIPT_DIR="${0:A:h}"
+PID_FILE="${SCRIPT_DIR}/codex-sidekick.pid"
+PROMPT_FILE="${SCRIPT_DIR}/codex-sidekick-prompt.md"
+
+echo $$ > "${PID_FILE}"
+cd "${SCRIPT_DIR}" || exit 1
+
+if ! command -v codex >/dev/null 2>&1; then
+    echo "Codex was not found on your interactive shell PATH."
+    echo "Make sure 'codex' works in a new terminal, then run the trigger again."
+    echo
+    read '?Press return to close.'
+    exit 127
+fi
+
+exec codex \
+    --cd "${SCRIPT_DIR}" \
+    --ask-for-approval untrusted \
+    --sandbox read-only \
+    -- "$(cat "${PROMPT_FILE}")"
+SCRIPT
+chmod 0755 "${LAUNCHER_FILE}"
+
+# --- launch_in_terminal: open the user's preferred terminal directly --------
+# Canonical source: scripts/support/launch-in-terminal.sh. Keep in sync.
+launch_in_terminal() {
+    local script="$1"
+    local choice="${PREFERRED_TERM:-}"
+    local order=(ghostty iterm alacritty terminal)
+    local t
+
+    _term_installed() {
+        case "$1" in
+        ghostty) [ -x "/Applications/Ghostty.app/Contents/MacOS/ghostty" ] ;;
+        iterm) [ -d "/Applications/iTerm.app" ] ;;
+        alacritty) [ -x "/Applications/Alacritty.app/Contents/MacOS/alacritty" ] ;;
+        terminal) true ;;
+        *) return 1 ;;
+        esac
+    }
+
+    if [ -n "$choice" ]; then
+        if ! _term_installed "$choice"; then
+            echo "codex-sidekick: PREFERRED_TERM='$choice' is not installed; auto-detecting" >&2
+            choice=""
+        fi
+    fi
+    if [ -z "$choice" ]; then
+        for t in "${order[@]}"; do
+            if _term_installed "$t"; then choice="$t"; break; fi
+        done
+    fi
+    [ -z "$choice" ] && choice="terminal"
+
+    case "$choice" in
+    ghostty) "/Applications/Ghostty.app/Contents/MacOS/ghostty" -e "$script" & ;;
+    alacritty) "/Applications/Alacritty.app/Contents/MacOS/alacritty" -e "$script" & ;;
+    iterm)
+        osascript - "$script" <<'OSA'
+on run argv
+    set scriptPath to item 1 of argv
+    tell application "iTerm"
+        activate
+        set newWindow to (create window with default profile)
+        tell current session of newWindow to write text (quoted form of scriptPath)
+    end tell
+end run
+OSA
+        ;;
+    terminal | *)
+        osascript - "$script" <<'OSA'
+on run argv
+    set scriptPath to item 1 of argv
+    tell application "Terminal"
+        activate
+        do script (quoted form of scriptPath)
+    end tell
+end run
+OSA
+        ;;
+    esac
+}
+
+if [ "${CODEX_SIDEKICK_DRY_RUN:-}" = "1" ]; then
+    echo "codex-sidekick: dry run generated ${LAUNCHER_FILE}"
+    exit 0
+fi
+
+launch_in_terminal "${LAUNCHER_FILE}"

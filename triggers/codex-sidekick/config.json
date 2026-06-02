@@ -1,0 +1,7 @@
+{
+  "name": "Codex Sidekick",
+  "description": "Launches Codex as a live call companion when Tuple transcription starts. It reads the transcript as the call happens, logs a running play-by-play, and chimes in when you say \"Codex\".",
+  "category": "Sidekick",
+  "platforms": ["macos"],
+  "language": "bash"
+}

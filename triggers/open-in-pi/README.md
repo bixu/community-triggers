@@ -2,7 +2,7 @@
 
 Launches [Pi](https://pi.dev/) in the current Tuple transcription directory when transcription starts.
 
-The trigger writes an `open-in-pi.command` wrapper next to the live transcript files and asks macOS to open it. The wrapper runs as `#!/bin/zsh -li`, so `pi` resolves from the same interactive shell environment you get in a new terminal. Nothing is hard-coded: Pi uses whichever provider and model you have configured as your default.
+The trigger writes an `open-in-pi.sh` wrapper next to the live transcript files and opens it in your preferred terminal. The wrapper runs as `#!/bin/zsh -li`, so `pi` resolves from the same interactive shell environment you get in a new terminal. Nothing is hard-coded: Pi uses whichever provider and model you have configured as your default.
 
 ## What makes this one different
 
@@ -34,8 +34,8 @@ When `call-transcription-started` fires, Tuple provides `TUPLE_TRIGGER_CALL_ARTI
 
 1. Copies the shipped `tuple-call-watch.ts` into `.pi/extensions/` inside that directory and writes a `tuple-call-watch.config.json` next to it (the artifacts directory and call id).
 2. Writes `pi-sidekick-prompt.md` into that directory.
-3. Writes an executable `open-in-pi.command` wrapper into that directory.
-4. Opens the wrapper through macOS with `/usr/bin/open`.
+3. Writes an executable `open-in-pi.sh` wrapper into that directory.
+4. Opens it in your preferred terminal (Ghostty → iTerm → Alacritty → Terminal; set `PREFERRED_TERM` to choose), falling back to Terminal.app.
 5. The wrapper starts a login interactive zsh shell, changes into the transcription directory, and runs `pi "$(cat pi-sidekick-prompt.md)"`. Pi auto-discovers `.pi/extensions/*.ts` from that directory, so the watcher is active immediately.
 
 The watcher (`tuple-call-watch.ts`) tails `transcriptions.jsonl` and `events.jsonl` (plus sibling directories for the same call) from saved byte offsets, resolves `user_id` to speaker names, and batches new lines on natural pauses (a ~3.5s lull, or every ~20s during continuous talking). It feeds a batch, and triggers a turn, only while Pi is idle and has no pending messages, so consumption never collides with your messages or with itself. It degrades safely: if its config is missing it watches the working directory, and any error is swallowed rather than taking down the session.
