@@ -158,13 +158,13 @@ fi
 # workspace-write (not read-only): the watcher persists its per-session
 # .tuple-watcher-offsets file under the transcripts root between --exit-on-batch
 # runs; read-only silently fails that write, so every re-run replays the whole
-# backlog instead of resuming. on-failure (not never): sandboxed commands run
+# backlog instead of resuming. on-request (not never): sandboxed commands run
 # without prompting so the watcher loop stays unattended, but Codex still pauses
-# to ask before anything that fails and wants out of the workspace sandbox (e.g.
-# network) — the approval gate stays in place, just not on every watcher run.
+# to ask before anything that wants out of the workspace sandbox (e.g. network)
+# — the approval gate stays in place, just not on every watcher run.
 exec codex \
     --cd "${SCRIPT_DIR}/.." \
-    --ask-for-approval on-failure \
+    --ask-for-approval on-request \
     --sandbox workspace-write \
     -- "$(cat "${PROMPT_FILE}")"
 SCRIPT

@@ -4,7 +4,7 @@ Launches [Codex](https://developers.openai.com/codex/cli/) when Tuple transcript
 
 The trigger writes a `launch-codex-summary.command` wrapper next to the transcript files and opens it in your preferred terminal. The wrapper runs as `#!/bin/zsh -li`, so `codex` resolves from the same interactive shell environment you get in a new terminal. No install location is hard-coded.
 
-Codex starts in the transcription directory with a focused summary prompt. It reads the whole call by running Tuple's bundled watcher (`tuple-call-watcher.py --catchup`, shipped with this trigger), produces a concise summary with decisions, action items, and open questions, then stays available for transcript-backed follow-up questions. It runs `--sandbox read-only` (the summary only needs to read), with `--ask-for-approval on-failure` so the run stays unattended.
+Codex starts in the transcription directory with a focused summary prompt. It reads the whole call by running Tuple's bundled watcher (`tuple-call-watcher.py --catchup`, shipped with this trigger), produces a concise summary with decisions, action items, and open questions, then stays available for transcript-backed follow-up questions. It runs `--sandbox read-only` (the summary only needs to read), with `--ask-for-approval on-request` so the run stays unattended.
 
 ## Prerequisites
 
@@ -28,6 +28,6 @@ When `call-transcription-complete` fires, Tuple provides `TUPLE_TRIGGER_CALL_ART
 1. Copies the fixed `tuple-call-watcher.py` and writes `codex-summary-prompt.md` into that directory.
 2. Writes an executable `launch-codex-summary.command` wrapper into that directory.
 3. Opens it in your preferred terminal via `open` (Ghostty → iTerm → Alacritty → Terminal; set `PREFERRED_TERM` to choose). No AppleScript, so it triggers no macOS accessibility prompt.
-4. The wrapper starts a login interactive zsh shell, changes into the transcription directory, and runs `codex --sandbox read-only --ask-for-approval on-failure` with the summary prompt.
+4. The wrapper starts a login interactive zsh shell, changes into the transcription directory, and runs `codex --sandbox read-only --ask-for-approval on-request` with the summary prompt.
 
 For local script testing without opening a terminal, set `CODEX_TRANSCRIPT_SUMMARY_DRY_RUN=1`.

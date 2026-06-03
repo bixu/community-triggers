@@ -11,7 +11,7 @@ When `call-transcription-started` fires, this trigger opens your preferred termi
 - **Answers when addressed.** Say "Codex, ..." (or type into the terminal) and it responds to that turn, then keeps following the call.
 - **Summarizes.** It writes a checkpoint summary when recording stops and a final summary (decisions, action items, open threads) when the call ends.
 
-Codex follows the call with **Tuple's bundled watcher** (`tuple-call-watcher.py`), shipped with this trigger and run verbatim: a fixed, deterministic script rather than a watch loop the model re-authors each session. Since Codex has no event-driven wake, it runs the watcher once with `--catchup`, then repeatedly in `--exit-on-batch` mode (each run blocks until the next batch, prints it, and exits). It launches with `codex --sandbox workspace-write --ask-for-approval on-failure`. The workspace-write sandbox lets the watcher persist its offset files between runs (read-only would silently drop those writes and replay the whole backlog every cycle); on-failure approval keeps the loop unattended while Codex still pauses to ask before anything that fails and wants out of the sandbox.
+Codex follows the call with **Tuple's bundled watcher** (`tuple-call-watcher.py`), shipped with this trigger and run verbatim: a fixed, deterministic script rather than a watch loop the model re-authors each session. Since Codex has no event-driven wake, it runs the watcher once with `--catchup`, then repeatedly in `--exit-on-batch` mode (each run blocks until the next batch, prints it, and exits). It launches with `codex --sandbox workspace-write --ask-for-approval on-request`. The workspace-write sandbox lets the watcher persist its offset files between runs (read-only would silently drop those writes and replay the whole backlog every cycle); on-request approval keeps the loop unattended while Codex still pauses to ask before anything that wants out of the sandbox.
 
 ## Choosing your terminal
 
@@ -45,7 +45,7 @@ When `call-transcription-started` fires, Tuple provides `TUPLE_TRIGGER_CALL_ARTI
 1. Copies the fixed `tuple-call-watcher.py` and writes `codex-sidekick-prompt.md` into that directory.
 2. Writes an executable `launch-codex-sidekick.command` wrapper into that directory.
 3. Opens it in your preferred terminal via `open` (LaunchServices). No AppleScript and no direct binary launch, so it triggers no macOS accessibility prompt and no stray windows.
-4. The wrapper starts a login-interactive zsh, changes to the transcripts root, and runs `codex --sandbox workspace-write --ask-for-approval on-failure` with the prompt. Codex runs the bundled watcher to catch up and follow the call.
+4. The wrapper starts a login-interactive zsh, changes to the transcripts root, and runs `codex --sandbox workspace-write --ask-for-approval on-request` with the prompt. Codex runs the bundled watcher to catch up and follow the call.
 
 A PID file (`codex-sidekick.pid`) keeps a second transcription start from launching a duplicate sidekick for the same call.
 

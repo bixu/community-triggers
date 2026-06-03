@@ -162,11 +162,11 @@ fi
 
 # read-only: the summary only reads the transcript and runs the watcher in
 # --catchup (the watcher tolerates a read-only FS — it warns and exits 0 if it
-# can't persist offsets, which a one-shot summary never needs). on-failure keeps
+# can't persist offsets, which a one-shot summary never needs). on-request keeps
 # the run unattended while still gating anything that wants out of the sandbox.
 exec codex \
     --cd "${SCRIPT_DIR}" \
-    --ask-for-approval on-failure \
+    --ask-for-approval on-request \
     --sandbox read-only \
     -- "$(cat "${PROMPT_FILE}")"
 SCRIPT
