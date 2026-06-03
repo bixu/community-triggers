@@ -37,7 +37,6 @@ elif [[ "${PARENT_NAME}" =~ ^[0-9A-Fa-f-]{8,}$ ]]; then
 else
     CALL_ID="${SESSION_DIR}"
 fi
-SHORT_ID="${CALL_ID:0:8}"
 
 # Infer the Tuple environment from the artifacts path so we read the matching
 # identity + context files. The liaison appends BOTH (identity for who the user
@@ -105,19 +104,33 @@ PROMPT
 sed -e "s|__SESSIONDIR__|${SESSION_DIR}|g" -e "s|__CALLID__|${CALL_ID}|g" "${PROMPT_FILE}.tmpl" > "${PROMPT_FILE}"
 rm -f "${PROMPT_FILE}.tmpl"
 
-cat > "${LAUNCHER_FILE}" <<SCRIPT
+# The launcher self-locates via ${0:A:h} (the session dir it is written into) and
+# derives every path from there, so nothing but the call-id is baked in. CALL_ID
+# rides in through a short unquoted preamble — a plain assignment with no $$/$(...)
+# to escape — and the quoted SCRIPT body then uses $$ and $(cat ...) verbatim.
+cat > "${LAUNCHER_FILE}" <<EOF
 #!/bin/zsh -li
-printf '\e]0;Tuple Call ${SHORT_ID}\a'
+CALL_ID='${CALL_ID}'
+EOF
+cat >> "${LAUNCHER_FILE}" <<'SCRIPT'
+SHORT_ID="${CALL_ID:0:8}"
+printf '\e]0;Tuple Call %s\a' "${SHORT_ID}"
 clear
 echo 'Starting Claude call liaison…'
 echo
 
-SCRIPT_DIR="\${0:A:h}"
+SCRIPT_DIR="${0:A:h}"
+SYSTEM_PROMPT_FILE="${SCRIPT_DIR}/system-prompt.md"
+PROMPT_FILE="${SCRIPT_DIR}/claude-call-liaison-prompt.md"
+# PID file lives in the transcripts root (the session dir's parent), keyed by
+# call-id, so a mid-call transcription restart finds this session and skips
+# relaunching even though the session dir itself is recreated.
+PID_FILE="${SCRIPT_DIR}/../.liaison-${CALL_ID}.pid"
 
-echo \$\$ > '${PID_FILE}'
+echo $$ > "${PID_FILE}"
 # cwd = the transcripts root (parent of this call's session dir) so the watcher
-# path \`./<session-dir>/...\` and the call-scoped find both resolve.
-cd "\${SCRIPT_DIR}/.." || exit 1
+# path `./<session-dir>/...` and the call-scoped find both resolve.
+cd "${SCRIPT_DIR}/.." || exit 1
 
 if ! command -v claude >/dev/null 2>&1; then
     echo "Claude Code was not found on your interactive shell PATH."
@@ -133,12 +146,12 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 127
 fi
 
-exec claude \\
-    --model opus \\
-    --effort low \\
-    --name "Tuple Call Liaison" \\
-    --append-system-prompt-file '${SYSTEM_PROMPT_FILE}' \\
-    "\$(cat '${PROMPT_FILE}')"
+exec claude \
+    --model opus \
+    --effort low \
+    --name "Tuple Call Liaison" \
+    --append-system-prompt-file "${SYSTEM_PROMPT_FILE}" \
+    "$(cat "${PROMPT_FILE}")"
 SCRIPT
 chmod 0755 "${LAUNCHER_FILE}"
 
