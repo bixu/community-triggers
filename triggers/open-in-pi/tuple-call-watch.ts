@@ -83,6 +83,33 @@ function isWake(text: string): boolean {
   return /(^|\b)(hey\s+pi\b|pi\s*[,:]|pi\s+(can|could|would|are|did|do|please|what|why|how))/i.test(text);
 }
 
+function userIdKey(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (value && typeof value === "object" && "id" in value) {
+    const id = (value as { id?: unknown }).id;
+    if (typeof id === "string" || typeof id === "number") return String(id);
+  }
+  return "";
+}
+
+function displayName(user: unknown): string {
+  if (!user || typeof user !== "object") return "";
+  const u = user as { full_name?: unknown; short_name?: unknown; email?: unknown };
+  for (const field of [u.full_name, u.short_name, u.email]) {
+    if (typeof field === "string" && field.trim()) return field.trim();
+  }
+  return "";
+}
+
+function parseUserNameFromMessage(message: unknown): string {
+  if (typeof message !== "string") return "";
+  const fullName = message.match(/full_name=([^,)]+)/)?.[1]?.trim();
+  if (fullName) return fullName;
+  if (/\buser\(id=/.test(message)) return "";
+  const joinedName = message.replace(/\s+(joined|connected).*$/i, "").trim();
+  return joinedName && joinedName !== message.trim() ? joinedName : "";
+}
+
 export default function (pi: ExtensionAPI) {
   const cwd = process.cwd();
   const { artifactsDir, callId } = readConfig(cwd);
@@ -102,19 +129,20 @@ export default function (pi: ExtensionAPI) {
   let timer: ReturnType<typeof setInterval> | undefined;
 
   function resolveSpeaker(userId: unknown): string {
-    const id = typeof userId === "string" ? userId : "";
+    const id = userIdKey(userId);
     return speakers[id] || id || "unknown";
   }
 
   // Returns the formatted dot-line and whether it demands Pi's attention.
-  // Learning a speaker name from a join event is a side effect; `scan` processes
-  // every directory's events before any transcripts so names resolve correctly.
+  // Learning speaker names from user-bearing events is a side effect; `scan`
+  // processes every directory's events before transcripts so names resolve correctly.
   function format(file: string, rec: any): { line: string; urgent: boolean } | null {
     if (file.endsWith("events.jsonl")) {
       const category = String(rec.category ?? "");
-      if (rec.user && (category === "user_joined" || category === "participant_joined")) {
-        const name = typeof rec.message === "string" ? rec.message.replace(/\s+(joined|connected).*$/i, "").trim() : "";
-        if (name) speakers[String(rec.user)] = name;
+      if (rec.user) {
+        const id = userIdKey(rec.user);
+        const name = displayName(rec.user) || parseUserNameFromMessage(rec.message);
+        if (id && name) speakers[id] = name;
       }
       if (SKIP_EVENT_CATEGORIES.has(category)) return null;
       const urgent = category === "recording_stopped" || category === "call_ended";
