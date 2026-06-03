@@ -37,11 +37,28 @@ fi
 
 PID_FILE="${TRANSCRIPTION_DIR}/pi-summary.pid"
 PROMPT_FILE="${TRANSCRIPTION_DIR}/pi-summary-prompt.md"
-COMMAND_FILE="${TRANSCRIPTION_DIR}/summarize-in-pi.command"
+# Set your preferred terminal here, or leave empty to auto-detect.
+# One of: ghostty | iterm | alacritty | terminal
+# (Also overridable from the environment: PREFERRED_TERM=iterm)
+PREFERRED_TERM="${PREFERRED_TERM:-}"
+LAUNCHER_FILE="${TRANSCRIPTION_DIR}/launch-pi-summary.command"
+TRIGGER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+WATCHER_SRC="${TRIGGER_DIR}/tuple-call-watcher.py"
+WATCHER_DST="${TRANSCRIPTION_DIR}/tuple-call-watcher.py"
 
 if [ -f "${PID_FILE}" ] && kill -0 "$(cat "${PID_FILE}" 2>/dev/null)" 2>/dev/null; then
     echo "pi-transcript-summary: Pi summary already running for ${TRANSCRIPTION_DIR}"
     exit 0
+fi
+
+# Ship the fixed transcript watcher so the summary reads the backlog
+# deterministically via --catchup instead of hand-reading the JSONL files.
+if [ -f "${WATCHER_SRC}" ]; then
+    cp "${WATCHER_SRC}" "${WATCHER_DST}"
+    chmod 0755 "${WATCHER_DST}"
+else
+    echo "pi-transcript-summary: watcher not found at ${WATCHER_SRC}" >&2
+    exit 1
 fi
 
 {
@@ -59,7 +76,7 @@ The current directory should contain `events.jsonl` and `transcriptions.jsonl`, 
 
 ## Goal
 
-Read the transcript artifacts, then immediately produce a tight, useful call summary. This is a completed-transcription trigger, not a live sidekick trigger: do not start a file watcher or write a monitoring extension.
+Read the full transcript (see How to read the transcript), then immediately produce a tight, useful call summary. This is a completed-transcription trigger: run the watcher once in `--catchup` mode to read the backlog — do not start a live or continuous watch, and do not write a monitoring extension.
 
 ## File schemas
 
@@ -70,11 +87,18 @@ Read the transcript artifacts, then immediately produce a tight, useful call sum
 
 If a field looks unfamiliar, inspect a few records and adapt rather than assuming.
 
-## What to read
+## How to read the transcript
 
-Start with the current directory's `events.jsonl` and `transcriptions.jsonl`. If the parent directory contains sibling transcription directories whose names end with the inferred call id from the trigger header, inspect those too and include them only when they are clearly part of the same call. Keep the current directory as the primary source.
+Tuple ships a fixed watcher script in this directory. Read the whole call by running it once in catch-up mode:
 
-Build a speaker map from `user_joined` events. Ignore noisy `user_audio_started` and `user_audio_stopped` events unless they matter for interpreting the transcript. Use timestamps when they help anchor decisions, action items, or follow-up questions.
+    ./tuple-call-watcher.py --catchup
+
+It prints every record across all of this call's session directories (including any mid-call restarts) as tagged lines:
+
+    T|<session-dir>|<json-record>   a transcriptions.jsonl record
+    E|<session-dir>|<json-record>   an events.jsonl record
+
+Parse the `<json-record>` portion of each. Build a speaker map from `user_joined` events; the watcher already drops the noisy `user_audio_started`/`user_audio_stopped` events. Use timestamps when they help anchor decisions, action items, or follow-up questions. (The raw `events.jsonl` / `transcriptions.jsonl` files are still here if you want to read one directly.)
 
 ## Output
 
@@ -108,9 +132,9 @@ Stay available for follow-up questions in this Pi session. When the user asks a 
 PROMPT
 } > "${PROMPT_FILE}"
 
-cat > "${COMMAND_FILE}" <<'SCRIPT'
+cat > "${LAUNCHER_FILE}" <<'SCRIPT'
 #!/bin/zsh -li
-printf '\e]0;Tuple Transcript Summary\a'
+printf '\e]0;Tuple Pi Summary\a'
 clear
 echo 'Starting Pi transcript summary...'
 echo
@@ -133,11 +157,31 @@ fi
 exec pi "$(cat "${PROMPT_FILE}")"
 SCRIPT
 
-chmod 0755 "${COMMAND_FILE}"
+chmod 0755 "${LAUNCHER_FILE}"
+
+# --- launch_in_terminal: open the .command launcher in the user's terminal ---
+# Uses LaunchServices (`open`) only — no direct binary exec and no AppleScript,
+# so it triggers no macOS accessibility prompt and no stray empty windows.
+# With PREFERRED_TERM empty, the launcher opens in your default handler for
+# .command files (change it in Finder: right-click a .command > Open With >
+# your terminal > Change All). Set PREFERRED_TERM to force one for this trigger.
+# Ghostty, iTerm, and Terminal run an opened .command directly; Alacritty has no
+# document handler, so it is launched with `open -na ... --args -e`.
+launch_in_terminal() {
+    local file="$1"
+    case "${PREFERRED_TERM:-}" in
+    "") open "$file" ;;
+    ghostty) open -a "Ghostty" "$file" 2>/dev/null || open "$file" ;;
+    iterm) open -a "iTerm" "$file" 2>/dev/null || open "$file" ;;
+    terminal) open -a "Terminal" "$file" 2>/dev/null || open "$file" ;;
+    alacritty) open -na "Alacritty" --args -e "$file" 2>/dev/null || open "$file" ;;
+    *) echo "launch_in_terminal: unknown PREFERRED_TERM='${PREFERRED_TERM}'; using default handler" >&2; open "$file" ;;
+    esac
+}
 
 if [ "${PI_TRANSCRIPT_SUMMARY_DRY_RUN:-}" = "1" ]; then
-    echo "pi-transcript-summary: dry run generated ${COMMAND_FILE}"
+    echo "pi-transcript-summary: dry run generated ${LAUNCHER_FILE}"
     exit 0
 fi
 
-/usr/bin/open "${COMMAND_FILE}" &
+launch_in_terminal "${LAUNCHER_FILE}"

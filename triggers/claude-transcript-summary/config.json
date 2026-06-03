@@ -1,0 +1,7 @@
+{
+  "name": "Claude Transcript Summary",
+  "description": "Launches Claude Code when Tuple transcription completes and asks it to summarize the completed transcript.",
+  "category": "Call Summary",
+  "platforms": ["macos"],
+  "language": "bash"
+}
