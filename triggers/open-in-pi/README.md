@@ -36,7 +36,7 @@ When `call-transcription-started` fires, Tuple provides `TUPLE_TRIGGER_CALL_ARTI
 2. Writes `pi-sidekick-prompt.md` into that directory.
 3. Writes an executable `launch-pi-sidekick.command` wrapper into that directory.
 4. Opens it in your preferred terminal via `open` (LaunchServices). With `PREFERRED_TERM` empty it opens in your default handler for `.command` files; set it to one of `ghostty | iterm | alacritty | terminal` to force one. No AppleScript, so it triggers no macOS accessibility prompt.
-5. The wrapper starts a login-interactive zsh, changes into the transcription directory, and runs `pi --name "Tuple Pi Sidekick" "$(cat pi-sidekick-prompt.md)"`. Pi auto-discovers `.pi/extensions/*.ts` from that directory, so the watcher is active immediately.
+5. The wrapper starts a login-interactive zsh, changes into the transcription directory, and runs `pi "$(cat pi-sidekick-prompt.md)"`. Pi auto-discovers `.pi/extensions/*.ts` from that directory, so the watcher is active immediately.
 
 The watcher (`tuple-call-watch.ts`) tails `transcriptions.jsonl` and `events.jsonl` (plus sibling directories for the same call) from saved byte offsets, resolves `user_id` to speaker names, and batches new lines on natural pauses (a ~3.5s lull, or every ~20s during continuous talking). It feeds a batch, and triggers a turn, only while Pi is idle and has no pending messages, so consumption never collides with your messages or with itself. It degrades safely: if its config is missing it watches the working directory, and any error is swallowed rather than taking down the session.
 
