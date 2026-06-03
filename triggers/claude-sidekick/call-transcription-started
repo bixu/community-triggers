@@ -159,7 +159,7 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 127
 fi
 
-exec claude --allowed-tools Read Bash Monitor -- "$(cat "${PROMPT_FILE}")"
+exec claude --allowed-tools Read Bash Monitor --name "Tuple Claude Sidekick" -- "$(cat "${PROMPT_FILE}")"
 SCRIPT
 chmod 0755 "${LAUNCHER_FILE}"
 

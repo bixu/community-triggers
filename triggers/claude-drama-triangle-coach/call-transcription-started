@@ -142,6 +142,7 @@ fi
 exec claude \\
     --model opus \\
     --effort low \\
+    --name "Tuple Drama Coach" \\
     --append-system-prompt-file '${SYSTEM_PROMPT_FILE}' \\
     "\$(cat '${PROMPT_FILE}')"
 SCRIPT

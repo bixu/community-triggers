@@ -129,7 +129,7 @@ if ! command -v pi >/dev/null 2>&1; then
     exit 127
 fi
 
-exec pi "$(cat "${PROMPT_FILE}")"
+exec pi --name "Tuple Pi Sidekick" "$(cat "${PROMPT_FILE}")"
 SCRIPT
 
 chmod 0755 "${COMMAND_FILE}"
