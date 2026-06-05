@@ -17,17 +17,33 @@
 // working directory.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
 import fs from "node:fs";
 import path from "node:path";
+import { Type } from "typebox";
 
 type SpeakerMap = Record<string, string>;
-type ScanResult = { added: boolean; urgent: boolean };
+type ScanResult = { added: boolean; urgent: boolean; stopOrEnd: boolean };
+type FormattedRecord = { line: string; urgent: boolean; stopOrEnd: boolean; sortMs: number };
+type WatchMode = "realtime" | "balanced" | "low_noise";
+type WatchTiming = { pollMs: number; quietMs: number; maxWaitMs: number; description: string };
 
-const POLL_MS = 1500; // how often to check the files for new lines
-const QUIET_MS = 3500; // a pause this long flushes the buffered batch to Pi
-const MAX_WAIT_MS = 20000; // force a flush during long continuous talking
-const STUCK_MS = 15000; // clear a stuck pending-turn guard if no turn ever ran
+const STOP_OR_END_GRACE_MS = 1500; // let final transcript lines land before the stop/end summary
+const STUCK_MS = 10000; // clear a stuck pending-turn guard if no turn ever ran
 const SKIP_EVENT_CATEGORIES = new Set(["user_audio_started", "user_audio_stopped"]);
+const STOP_OR_END_EVENT_CATEGORIES = new Set(["recording_stopped", "recording_ended", "call_ended"]);
+const DEFAULT_WATCH_MODE: WatchMode = "balanced";
+const WATCH_TIMINGS: Record<WatchMode, WatchTiming> = {
+  realtime: { pollMs: 250, quietMs: 900, maxWaitMs: 5000, description: "fastest, for pair programming or troubleshooting" },
+  balanced: { pollMs: 1000, quietMs: 2000, maxWaitMs: 12000, description: "default, for normal meetings and onboarding calls" },
+  low_noise: { pollMs: 1500, quietMs: 3500, maxWaitMs: 20000, description: "least chatty, for presentations or long monologues" },
+};
+const WATCH_MODE_PARAMS = Type.Object({
+  mode: StringEnum(["realtime", "balanced", "low_noise"] as const, {
+    description: "How quickly the Tuple call watcher should send future transcript batches",
+  }),
+  reason: Type.Optional(Type.String({ description: "Why this monitoring pace fits the current call" })),
+});
 
 function readConfig(cwd: string): { artifactsDir: string; callId: string } {
   const candidates = [
@@ -66,16 +82,19 @@ function watchDirs(artifactsDir: string, callId: string): string[] {
   return [...dirs];
 }
 
-function hms(value: unknown): string {
-  // events carry ISO `time`; transcripts carry numeric `start` seconds.
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return new Date(value * 1000).toISOString().slice(11, 19);
-  }
+function timestampMs(value: unknown): number {
+  // events carry ISO `time`; transcripts may carry ISO `start` or numeric seconds.
+  if (typeof value === "number" && Number.isFinite(value)) return value * 1000;
   if (typeof value === "string") {
     const d = new Date(value);
-    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(11, 19);
+    if (!Number.isNaN(d.getTime())) return d.getTime();
   }
-  return "--:--:--";
+  return Number.POSITIVE_INFINITY;
+}
+
+function hms(value: unknown): string {
+  const ts = timestampMs(value);
+  return Number.isFinite(ts) ? new Date(ts).toISOString().slice(11, 19) : "--:--:--";
 }
 
 function isWake(text: string): boolean {
@@ -110,11 +129,23 @@ function parseUserNameFromMessage(message: unknown): string {
   return joinedName && joinedName !== message.trim() ? joinedName : "";
 }
 
+function isWatchMode(value: string): value is WatchMode {
+  return Object.prototype.hasOwnProperty.call(WATCH_TIMINGS, value);
+}
+
+function watchModeDescription(mode: WatchMode): string {
+  const timing = WATCH_TIMINGS[mode];
+  return `${mode} (${timing.pollMs}ms poll, ${timing.quietMs}ms quiet, ${timing.maxWaitMs}ms max; ${timing.description})`;
+}
+
 export default function (pi: ExtensionAPI) {
   const cwd = process.cwd();
   const { artifactsDir, callId } = readConfig(cwd);
   const speakers: SpeakerMap = {};
   const offsets: Record<string, number> = {};
+  let callStartMs = 0;
+  let watchMode = DEFAULT_WATCH_MODE;
+  let watchTiming = WATCH_TIMINGS[watchMode];
 
   const backlog: string[] = []; // lines from before Pi started — context only
   let backlogDelivered = false;
@@ -123,37 +154,58 @@ export default function (pi: ExtensionAPI) {
   let firstBufferedAt = 0;
   let lastArrivalAt = 0;
   let bufferUrgent = false; // batch contains a wake word or stop/end event
+  let bufferStopOrEndAt = 0; // first stop/end event in the buffered batch
 
   let turnPending = false; // a turn we triggered is queued or running
   let turnPendingSince = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
+  let timerCtx: any;
 
   function resolveSpeaker(userId: unknown): string {
     const id = userIdKey(userId);
     return speakers[id] || id || "unknown";
   }
 
+  function recordSortMs(value: unknown): number {
+    if (typeof value === "number" && Number.isFinite(value) && callStartMs) {
+      return callStartMs + value * 1000;
+    }
+    return timestampMs(value);
+  }
+
   // Returns the formatted dot-line and whether it demands Pi's attention.
   // Learning speaker names from user-bearing events is a side effect; `scan`
   // processes every directory's events before transcripts so names resolve correctly.
-  function format(file: string, rec: any): { line: string; urgent: boolean } | null {
+  function format(file: string, rec: any): FormattedRecord | null {
     if (file.endsWith("events.jsonl")) {
       const category = String(rec.category ?? "");
+      const eventSortMs = timestampMs(rec.time);
+      if (category === "recording_started" && Number.isFinite(eventSortMs)) callStartMs = eventSortMs;
       if (rec.user) {
         const id = userIdKey(rec.user);
         const name = displayName(rec.user) || parseUserNameFromMessage(rec.message);
         if (id && name) speakers[id] = name;
       }
       if (SKIP_EVENT_CATEGORIES.has(category)) return null;
-      const urgent = category === "recording_stopped" || category === "call_ended";
-      return { line: `- ${hms(rec.time)} event: ${category}${rec.message ? ` (${rec.message})` : ""}`, urgent };
+      const stopOrEnd = STOP_OR_END_EVENT_CATEGORIES.has(category);
+      return {
+        line: `- ${hms(rec.time)} event: ${category}${rec.message ? ` (${rec.message})` : ""}`,
+        urgent: stopOrEnd,
+        stopOrEnd,
+        sortMs: eventSortMs,
+      };
     }
     const text = String(rec.text ?? "");
-    return { line: `- ${hms(rec.start)} ${resolveSpeaker(rec.user_id)}: ${text}`, urgent: isWake(text) };
+    return {
+      line: `- ${hms(rec.start)} ${resolveSpeaker(rec.user_id)}: ${text}`,
+      urgent: isWake(text),
+      stopOrEnd: false,
+      sortMs: recordSortMs(rec.start),
+    };
   }
 
-  function scanFile(file: string, sink: string[]): ScanResult {
-    const result: ScanResult = { added: false, urgent: false };
+  function scanFile(file: string, sink: FormattedRecord[]): ScanResult {
+    const result: ScanResult = { added: false, urgent: false, stopOrEnd: false };
     let stat: fs.Stats;
     try {
       stat = fs.statSync(file);
@@ -189,9 +241,10 @@ export default function (pi: ExtensionAPI) {
       try {
         const formatted = format(file, JSON.parse(trimmed));
         if (formatted) {
-          sink.push(formatted.line);
+          sink.push(formatted);
           result.added = true;
           if (formatted.urgent) result.urgent = true;
+          if (formatted.stopOrEnd) result.stopOrEnd = true;
         }
       } catch {
         // skip an unparseable line
@@ -201,20 +254,30 @@ export default function (pi: ExtensionAPI) {
   }
 
   function scan(sink: string[]): ScanResult {
-    const result: ScanResult = { added: false, urgent: false };
+    const result: ScanResult = { added: false, urgent: false, stopOrEnd: false };
+    const formatted: FormattedRecord[] = [];
     const dirs = watchDirs(artifactsDir, callId);
     // All events first (across every directory) so a speaker's join is mapped
-    // before any transcript line that names them, even across sibling dirs.
+    // before any transcript line that names them, even across sibling dirs. Sort
+    // the formatted records afterward so the batch still reads chronologically.
     for (const dir of dirs) {
-      const r = scanFile(path.join(dir, "events.jsonl"), sink);
+      const r = scanFile(path.join(dir, "events.jsonl"), formatted);
       result.added ||= r.added;
       result.urgent ||= r.urgent;
+      result.stopOrEnd ||= r.stopOrEnd;
     }
     for (const dir of dirs) {
-      const r = scanFile(path.join(dir, "transcriptions.jsonl"), sink);
+      const r = scanFile(path.join(dir, "transcriptions.jsonl"), formatted);
       result.added ||= r.added;
       result.urgent ||= r.urgent;
+      result.stopOrEnd ||= r.stopOrEnd;
     }
+    formatted.sort((a, b) => {
+      const aMs = Number.isFinite(a.sortMs) ? a.sortMs : Number.MAX_SAFE_INTEGER;
+      const bMs = Number.isFinite(b.sortMs) ? b.sortMs : Number.MAX_SAFE_INTEGER;
+      return aMs - bMs;
+    });
+    sink.push(...formatted.map((rec) => rec.line));
     return result;
   }
 
@@ -232,23 +295,25 @@ export default function (pi: ExtensionAPI) {
     // these methods are absent on an older Pi, the call throws and the tick's
     // catch skips the flush — failing closed (no surprise turns) by design.
     if (!ctx.isIdle() || ctx.hasPendingMessages()) return;
-    const paused = now - lastArrivalAt >= QUIET_MS;
-    const overdue = now - firstBufferedAt >= MAX_WAIT_MS;
-    if (!paused && !overdue) return; // still mid-thought — keep buffering
+    const paused = now - lastArrivalAt >= watchTiming.quietMs;
+    const stopOrEndReady = bufferStopOrEndAt > 0 && now - bufferStopOrEndAt >= STOP_OR_END_GRACE_MS;
+    const overdue = now - firstBufferedAt >= watchTiming.maxWaitMs;
+    if (!stopOrEndReady && !paused && !overdue) return; // still mid-thought — keep buffering
 
     const batch = buffer.splice(0, buffer.length).join("\n");
     const urgent = bufferUrgent;
     firstBufferedAt = 0;
     bufferUrgent = false;
+    bufferStopOrEndAt = 0;
     turnPending = true;
     turnPendingSince = now;
     pi.sendMessage(
       {
         customType: "tuple-call-watch",
         content:
-          `New on the call:\n\n${batch}\n\n` +
+          `New on the call:\n\n${batch}\n\nWatcher metadata (not call content): current mode is ${watchModeDescription(watchMode)}.\n\n` +
           (urgent
-            ? "This includes a line addressed to you or a recording_stopped/call_ended event — respond per your instructions."
+            ? "This includes a line addressed to you or a recording_stopped/recording_ended/call_ended event — respond per your instructions."
             : "Leave a one-line `·` summary of what they just covered; escalate to `👋` only if something matters."),
         display: false,
       },
@@ -256,7 +321,63 @@ export default function (pi: ExtensionAPI) {
     );
   }
 
+  function startTimer(ctx: any) {
+    if (timer) clearInterval(timer);
+    timer = setInterval(() => {
+      try {
+        const r = scan(buffer);
+        if (r.added) {
+          const now = Date.now();
+          if (!firstBufferedAt) firstBufferedAt = now;
+          lastArrivalAt = now;
+          if (r.urgent) bufferUrgent = true;
+          if (r.stopOrEnd && !bufferStopOrEndAt) bufferStopOrEndAt = now;
+        }
+        maybeFlush(ctx);
+      } catch {
+        // a single bad tick (or a missing ctx method) must not kill the watcher
+      }
+    }, watchTiming.pollMs);
+    timer.unref?.();
+  }
+
+  function setWatchMode(mode: WatchMode, ctx?: any) {
+    const pollChanged = watchTiming.pollMs !== WATCH_TIMINGS[mode].pollMs;
+    watchMode = mode;
+    watchTiming = WATCH_TIMINGS[mode];
+    if (pollChanged && timer) startTimer(timerCtx ?? ctx);
+    try {
+      if (ctx?.hasUI) ctx.ui.setStatus("tuple-call-watch", `watch: ${mode}`);
+    } catch {
+      // status is best-effort
+    }
+  }
+
+  pi.registerTool({
+    name: "tuple_call_watch_set_mode",
+    label: "Tuple Watch Mode",
+    description: "Adjust how aggressively the Tuple call watcher batches live transcript lines before sending them to Pi.",
+    promptSnippet: "Set the Tuple live-call watch mode to realtime, balanced, or low_noise.",
+    promptGuidelines: [
+      "Use tuple_call_watch_set_mode when the call's shape changes enough that the live-call watcher should be faster or less chatty; do not call it on every batch.",
+    ],
+    parameters: WATCH_MODE_PARAMS,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const requested = String(params.mode ?? "").trim().toLowerCase().replace(/-/g, "_");
+      if (!isWatchMode(requested)) {
+        throw new Error("mode must be one of: realtime, balanced, low_noise");
+      }
+      setWatchMode(requested, ctx);
+      const reason = typeof params.reason === "string" && params.reason.trim() ? ` Reason: ${params.reason.trim()}` : "";
+      return {
+        content: [{ type: "text", text: `Tuple call watcher mode set to ${watchModeDescription(requested)}.${reason}` }],
+        details: { mode: requested, ...watchTiming, reason: params.reason ?? "" },
+      };
+    },
+  });
+
   pi.on("session_start", async (_event: any, ctx: any) => {
+    timerCtx = ctx;
     try {
       scan(backlog); // capture the call so far as context; offsets advance to end
     } catch {
@@ -264,6 +385,7 @@ export default function (pi: ExtensionAPI) {
     }
     try {
       if (ctx?.hasUI) {
+        ctx.ui.setStatus("tuple-call-watch", `watch: ${watchMode}`);
         ctx.ui.notify(
           `Listening to the call${callId ? ` (${callId})` : ""} — I'll chime in when it matters.`,
           "info",
@@ -274,21 +396,7 @@ export default function (pi: ExtensionAPI) {
     }
     // Install the watcher independently, so a backlog-scan failure above never
     // leaves the session without a live watcher.
-    timer = setInterval(() => {
-      try {
-        const r = scan(buffer);
-        if (r.added) {
-          const now = Date.now();
-          if (!firstBufferedAt) firstBufferedAt = now;
-          lastArrivalAt = now;
-          if (r.urgent) bufferUrgent = true;
-        }
-        maybeFlush(ctx);
-      } catch {
-        // a single bad tick (or a missing ctx method) must not kill the watcher
-      }
-    }, POLL_MS);
-    timer.unref?.();
+    startTimer(timerCtx);
   });
 
   // A turn we triggered has finished — let the next batch flush.

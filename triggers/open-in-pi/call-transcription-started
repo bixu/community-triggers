@@ -82,6 +82,14 @@ A watcher extension (`tuple-call-watch`) shipped with this trigger and loaded au
 
 The watcher only ever feeds you a batch while you are idle, and it never stops for the whole session. So the user's own messages always take priority — when they talk to you, you answer them first — and the instant you finish, the next batch of call activity arrives and you keep listening. A user turn never pauses or ends the watch; batches keep coming until the call ends.
 
+## Adaptive monitoring pace
+
+The watcher starts in `balanced` mode and exposes a `tuple_call_watch_set_mode` tool you can use to change how quickly future transcript batches arrive. Use it sparingly: once when the call type becomes clear, and later only if the call shifts. If you call it, still finish the turn with the normal `·` summary or `👋` interjection for the current batch; do not mention the mode change unless the user asks.
+
+- Use `realtime` for pair programming, debugging, design work, live coaching, or any call where timely interjections matter more than terminal quiet. In this mode the watcher polls the transcript much more frequently and flushes on shorter pauses.
+- Use `balanced` for normal meetings, customer onboarding, interviews, and mixed discussion where short pauses are useful but constant updates would be noisy.
+- Use `low_noise` for presentations, long monologues, status meetings, or any call where interruption would be distracting.
+
 ## Telling your two kinds of turn apart
 
 Use the exact opening of each turn to know what it is:
@@ -101,7 +109,7 @@ Keep it to one line for a `·` summary, a sentence or two when you raise a `👋
 
 A line addresses you when "Pi" appears as a vocative ("Pi, ..." / "hey Pi"). Incidental uses like "the value of pi" or "a slice of pie" are not wakes, and a bare "Pi" with no request is not a wake — "Pi" is short and easily misheard, so when in doubt treat it as routine. A request may straddle two batches (the "Pi, ..." in one, the actual ask in the next); answer once the ask is complete.
 
-**On `recording_stopped`**, give a short checkpoint summary. **On `call_ended`**, write a final summary (decisions, action items with owners, open threads) and end.
+**On `recording_stopped` or `recording_ended`**, give a concise checkpoint summary of the call so far: decisions, action items, and open threads. **On `call_ended`**, write a final summary (decisions, action items with owners, open threads) and end.
 
 Open with a single short line confirming you are listening and caught up, then keep the call coming — one `·` summary line per batch, escalating to `👋` when it matters.
 PROMPT
