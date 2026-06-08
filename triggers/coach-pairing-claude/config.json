@@ -1,0 +1,7 @@
+{
+  "name": "Coach - Pairing - Claude",
+  "description": "During the call, Claude fires a quiet macOS notification with a one-line nudge when your pairing session drifts into a known anti-pattern — backseat driving, a quiet pair, a silent driver, no goal set, no swaps. When the call ends, the same session writes a retro to pairing-evaluation.md: talk-time balance, which anti-patterns showed up with quotes, what worked, and one thing to practice next session. Based on Tuple's Pair Programming Guide.",
+  "category": "Real-Time Coach",
+  "platforms": ["macos"],
+  "language": "bash"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Coach - Drama Triangle - Claude",
+  "description": "During the call, Claude fires a quiet macOS notification with a one-line reframe when you slip into a Karpman Drama Triangle role (Victim, Persecutor, Rescuer). When the call ends, the same session writes a per-teammate analysis to drama-evaluation.md with concrete strategies for engaging each person going forward.",
+  "category": "Real-Time Coach",
+  "platforms": ["macos"],
+  "language": "bash"
+}
