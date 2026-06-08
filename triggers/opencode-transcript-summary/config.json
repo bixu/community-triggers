@@ -1,7 +1,0 @@
-{
-  "name": "OpenCode Transcript Summary",
-  "description": "Launches OpenCode when Tuple transcription completes and asks it to summarize the completed transcript.",
-  "category": "Call Summary",
-  "platforms": ["macos"],
-  "language": "bash"
-}

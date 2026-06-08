@@ -1,0 +1,7 @@
+{
+  "name": "Sidekick - OpenCode",
+  "description": "Launches OpenCode in the current Tuple transcription directory when transcription starts, with a live-call sidekick prompt for following the transcript.",
+  "category": "Sidekick",
+  "platforms": ["macos"],
+  "language": "bash"
+}

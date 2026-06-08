@@ -1,7 +1,0 @@
-{
-  "name": "Claude Cowork Call Summary",
-  "description": "Open Claude Cowork with a prefilled call-summary prompt when Tuple transcription completes.",
-  "category": "Call Summary",
-  "platforms": ["macos"],
-  "language": "bash"
-}

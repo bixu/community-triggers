@@ -1,7 +1,0 @@
-{
-  "name": "Codex Transcript Summary",
-  "description": "Launches Codex when Tuple transcription completes and asks it to summarize the completed transcript.",
-  "category": "Call Summary",
-  "platforms": ["macos"],
-  "language": "bash"
-}

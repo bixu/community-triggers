@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ARTIFACTS_DIR="$(cd "${TUPLE_TRIGGER_CALL_ARTIFACTS_DIRECTORY:?}" && pwd)"
+ARTIFACTS_BASENAME="${ARTIFACTS_DIR##*/}"
+CALL_ID="${ARTIFACTS_BASENAME##*@}"
+SHORT_ID="${CALL_ID:0:8}"
+TRANSCRIPTIONS_FILE="${ARTIFACTS_DIR}/transcriptions.jsonl"
+EVENTS_FILE="${ARTIFACTS_DIR}/events.jsonl"
+
+echo "call-summary-claude-cowork: triggered for ${ARTIFACTS_DIR}"
+
+if [ ! -s "${TRANSCRIPTIONS_FILE}" ]; then
+    echo "call-summary-claude-cowork: no transcripts on disk for ${SHORT_ID}; skipping"
+    exit 0
+fi
+
+urlencode() {
+    local string="${1}"
+    local encoded=""
+    local pos char
+
+    for ((pos = 0; pos < ${#string}; pos++)); do
+        char="${string:${pos}:1}"
+        case "${char}" in
+            [a-zA-Z0-9.~_-])
+                encoded+="${char}"
+                ;;
+            *)
+                printf -v encoded '%s%%%02X' "${encoded}" "'${char}"
+                ;;
+        esac
+    done
+
+    printf '%s' "${encoded}"
+}
+
+PROMPT=$(cat <<PROMPT
+A Tuple transcription just completed for call ${CALL_ID}.
+
+The attached folder is the Tuple transcription artifact directory:
+${ARTIFACTS_DIR}
+
+Read events.jsonl and transcriptions.jsonl from that directory in chronological order.
+
+Summarize the call from the transcript. If this looks like a stopped transcription segment from a still-active call, say that clearly and summarize the conversation so far.
+
+Produce:
+- A concise executive summary
+- Key decisions
+- Action items, with owners when stated
+- Open questions or loose ends
+- Any useful follow-up message draft
+
+Do not invent owners, decisions, or commitments. Use direct quotes only when they materially clarify the summary.
+
+Also write the same summary to:
+${ARTIFACTS_DIR}/call-summary.md
+PROMPT
+)
+
+DEEPLINK="claude://cowork/new?q=$(urlencode "${PROMPT}")&folder=$(urlencode "${ARTIFACTS_DIR}")"
+
+echo "call-summary-claude-cowork: opening Claude Cowork for ${SHORT_ID}"
+[ -s "${EVENTS_FILE}" ] || echo "call-summary-claude-cowork: no events file on disk for ${SHORT_ID}"
+open "${DEEPLINK}"
