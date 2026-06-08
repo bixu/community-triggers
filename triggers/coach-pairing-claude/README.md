@@ -17,7 +17,7 @@ The pairing framework is embedded into the system prompt. You do **not** need an
 
 While you're pairing:
 
-- Follows the call with **Tuple's bundled watcher** (`tuple-call-watcher.py`, shipped with this trigger): it catches up on the backlog once, then `Monitor`s a continuous run that wakes the coach on each new batch of transcript read off disk (no polling), plus a short fallback timer so it can notice *silences*. A quiet navigator or a grinding session produce no transcript to wake on.
+- Follows the call with **Tuple's bundled watcher** (`tuple-call-watcher.py`, shipped with this trigger): it catches up on the backlog once, then follows live. Where the `Monitor` tool is available (the preferred path) it `Monitor`s a continuous run that wakes the coach on each new batch of transcript read off disk, plus a short fallback timer so it can notice *silences*. Where `Monitor` is unavailable — e.g. on Bedrock — it falls back to looping the watcher in `--exit-on-batch --max-wait` mode over `Bash`, where each timed-out empty return is that same silence tick. A quiet navigator or a grinding session produce no transcript to wake on, which is why the silence check matters.
 - Maps both participants to names once from `user_joined` events, and tracks lightweight session state: talk-time balance, who last spoke, whether a goal was set, and how long it's been since a break or swap.
 - On each new line (or fallback tick), checks against the pairing smells in the system prompt.
 - When confidence is high, prints a terminal line and fires a desktop notification through the bundled `tuple-notify.sh` (uses `terminal-notifier` for a clickable popup if installed, falls back to `osascript`):

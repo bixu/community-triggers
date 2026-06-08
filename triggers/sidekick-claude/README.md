@@ -11,7 +11,7 @@ When `call-transcription-started` fires, this trigger opens your preferred termi
 - **Answers when addressed.** Say "Claude, ..." (or type into the terminal) and it responds to that turn, then keeps listening.
 - **Summarizes.** It writes a checkpoint summary when recording stops and a final summary (decisions, action items, open threads) when the call ends.
 
-Claude follows the call with **Tuple's bundled watcher** (`tuple-call-watcher.py`), shipped with this trigger and run verbatim: a fixed, deterministic script rather than a poll loop the model re-authors each session. Claude runs it once via `Bash --catchup` to read the backlog, then `Monitor`s a continuous run for live updates. It launches with `claude --allowed-tools Read Bash Monitor --name "Tuple Sidekick - Claude"`.
+Claude follows the call with **Tuple's bundled watcher** (`tuple-call-watcher.py`), shipped with this trigger and run verbatim: a fixed, deterministic script rather than a poll loop the model re-authors each session. Claude runs it once via `Bash --catchup` to read the backlog, then follows live. When the `Monitor` tool is available (the preferred path), it `Monitor`s a continuous run so it wakes on each emit. When `Monitor` is unavailable — e.g. on Bedrock, where it's disabled — Claude falls back to looping the watcher in `--exit-on-batch` mode over `Bash`, the same poll-by-re-execution the Codex sidekick uses. It launches with `claude --allowed-tools Read Bash Monitor --name "Tuple Sidekick - Claude"`.
 
 ## Choosing your terminal
 

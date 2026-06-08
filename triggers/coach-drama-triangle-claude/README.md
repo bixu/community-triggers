@@ -17,7 +17,7 @@ The Drama Triangle framework is embedded into the system prompt. You do **not** 
 
 While you're talking:
 
-- Follows the call with the bundled `tuple-call-watcher.py`: catches up on the backlog, then `Monitor`s a live run so it wakes on new lines (no polling).
+- Follows the call with the bundled `tuple-call-watcher.py`: catches up on the backlog, then follows live — `Monitor`ing a continuous run where the `Monitor` tool is available (the preferred path), or, where it isn't (e.g. Bedrock), looping the watcher in `--exit-on-batch --max-wait` mode over `Bash`.
 - Maps participant IDs to names once from `user_joined` events, then watches **only the lines attributed to you**.
 - On each new line, checks against the Drama Triangle markers in the system prompt.
 - When confidence is high (≥90%), prints a terminal line and fires a desktop notification through the bundled `tuple-notify.sh` (uses `terminal-notifier` for a clickable popup if installed, falls back to `osascript`):
@@ -75,7 +75,7 @@ When `call-transcription-started` fires, Tuple provides `TUPLE_TRIGGER_CALL_ARTI
 3. Writes an executable `launch-coach-drama-triangle-claude.command` wrapper.
 4. Opens it in your preferred terminal (Ghostty → iTerm → Alacritty → Terminal; override with `PREFERRED_TERM`) via `open` (LaunchServices). No AppleScript and no direct binary launch, so no macOS accessibility prompt and no stray windows.
 
-The wrapper starts a login-interactive zsh, changes to the transcripts root, and runs Claude. Claude runs the bundled watcher once to catch up, then `Monitor`s a continuous run for the life of the call, coaching your lines in real time off disk. The watcher follows every session directory for the call, so if transcription stops and restarts mid-call it picks the resumed stream up automatically. A PID file in the transcripts root, keyed by call ID, keeps a second transcription start from launching a duplicate coach. When a `call_ended` event arrives, the session reads the full transcript from disk, writes `drama-evaluation.md` into the active session directory, and fires the "analysis ready" notification.
+The wrapper starts a login-interactive zsh, changes to the transcripts root, and runs Claude. Claude runs the bundled watcher once to catch up, then follows the call for its life — `Monitor`ing a continuous run where `Monitor` is available, or looping `--exit-on-batch` over `Bash` where it isn't — coaching your lines in real time off disk. The watcher follows every session directory for the call, so if transcription stops and restarts mid-call it picks the resumed stream up automatically. A PID file in the transcripts root, keyed by call ID, keeps a second transcription start from launching a duplicate coach. When a `call_ended` event arrives, the session reads the full transcript from disk, writes `drama-evaluation.md` into the active session directory, and fires the "analysis ready" notification.
 
 For local testing without opening a terminal, set `COACH_DRAMA_TRIANGLE_CLAUDE_DRY_RUN=1`; it writes the prompt and launcher and exits.
 

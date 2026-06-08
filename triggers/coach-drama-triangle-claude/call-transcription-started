@@ -102,7 +102,7 @@ Follow the Setup steps in your appended system prompt. First, catch up on everyt
 
     ./__SESSIONDIR__/tuple-call-watcher.py --catchup --offsets coach-drama-triangle-claude
 
-Use that backlog to map your user's id to a name (via `user_joined` events) and to gauge the conversation so far. Then start the live watcher Monitor as your system prompt describes, return silently, and wait for a wake signal. Keep any catch-up output to yourself unless your user asks.
+Use that backlog to map your user's id to a name (via `user_joined` events) and to gauge the conversation so far. Then start live-follow as your system prompt describes — subscribe with `Monitor` if you have it, otherwise loop the `--exit-on-batch` watcher via `Bash` — and stay otherwise silent. Keep any catch-up output to yourself unless your user asks.
 PROMPT
 # bash 3.2 (macOS default) mangles heredocs inside $()/`` so the prompt is
 # written straight to a file, then placeholders are substituted with sed.

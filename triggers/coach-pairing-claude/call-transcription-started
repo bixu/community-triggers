@@ -108,7 +108,7 @@ Follow the Setup steps in your appended system prompt. First, catch up on everyt
 
     ./__SESSIONDIR__/tuple-call-watcher.py --catchup --offsets coach-pairing-claude
 
-Then return silently and wait for a wake signal.
+Then start live-follow per Setup — subscribe with `Monitor` if you have it, otherwise loop the `--exit-on-batch` watcher via `Bash` — and otherwise stay silent.
 PROMPT
 # bash 3.2 (macOS default) mangles heredocs inside $()/`` so the prompt is
 # written straight to a file, then placeholders are substituted with sed.

@@ -2,7 +2,7 @@
 """
 Tuple call companion watcher -- known-good, deterministic.
 
-Usage:  ./tuple-call-watcher.py [--catchup | --exit-on-batch] [--offsets TAG] [call-id] [transcripts-root]
+Usage:  ./tuple-call-watcher.py [--catchup | --exit-on-batch] [--max-wait SECS] [--offsets TAG] [call-id] [transcripts-root]
         (it's executable; equivalently `python3 tuple-call-watcher.py ...`)
   --catchup          one-shot: ignore any saved offset, read every file from the
                      start, print that backlog, save offsets, and exit. The
@@ -13,6 +13,12 @@ Usage:  ./tuple-call-watcher.py [--catchup | --exit-on-batch] [--offsets TAG] [c
                      either flag the watcher runs continuously (Claude + Monitor),
                      forwarding each poll's new records immediately and letting
                      Monitor re-wake the agent.
+  --max-wait SECS    only with --exit-on-batch: if no records arrive within SECS
+                     seconds, exit anyway with an empty batch, handing control
+                     back to the caller. Without it --exit-on-batch blocks until
+                     the next record -- which never comes in a silent room, so a
+                     poll-loop caller that does periodic work (e.g. a coach's
+                     silence checks) needs this to get a turn during silence.
   --offsets TAG      suffix for the per-session offset file
                      (.tuple-watcher-offsets-TAG), so two agents watching the same
                      call keep separate read positions.
@@ -38,6 +44,7 @@ import glob, os, sys, time
 exit_on_batch = False
 from_start = False
 offsets_tag = None
+max_wait = None
 positional = []
 _args = list(sys.argv[1:])
 _i = 0
@@ -54,6 +61,16 @@ while _i < len(_args):
             sys.stderr.write("tuple-watcher: --offsets needs a tag value\n")
             sys.exit(2)
         offsets_tag = _args[_i]
+    elif a == "--max-wait":
+        _i += 1
+        if _i >= len(_args) or _args[_i].startswith("--"):
+            sys.stderr.write("tuple-watcher: --max-wait needs a seconds value\n")
+            sys.exit(2)
+        try:
+            max_wait = float(_args[_i])
+        except ValueError:
+            sys.stderr.write("tuple-watcher: --max-wait needs a numeric seconds value\n")
+            sys.exit(2)
     else:
         positional.append(a)
     _i += 1
@@ -224,6 +241,12 @@ if from_start:
     sys.exit(0)
 
 
+# --max-wait deadline (only with --exit-on-batch): after this much wall-clock
+# with no flush, exit anyway so a poll-loop caller regains its turn during a
+# silent stretch. Reset on each flushed batch isn't needed -- exit-on-batch exits
+# on flush, so this loop only runs once per invocation.
+wait_deadline = (time.time() + max_wait) if (exit_on_batch and max_wait is not None) else None
+
 while True:
     newdata = collect()
 
@@ -247,6 +270,13 @@ while True:
         buf = []
         have = False
         catchup = False
+
+    # Silence past --max-wait: hand control back with whatever we have (usually an
+    # empty batch -- flush() no-ops on an empty buffer). Lets a Monitor-less caller
+    # run its periodic work instead of blocking here until the next record.
+    if wait_deadline is not None and not have and now >= wait_deadline:
+        save_state(off)
+        sys.exit(0)
 
     time.sleep(1)
 
