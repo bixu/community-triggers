@@ -37,7 +37,6 @@ fi
 
 PID_FILE="${TRANSCRIPTION_DIR}/slack-call-summary-claude.pid"
 PROMPT_FILE="${TRANSCRIPTION_DIR}/slack-call-summary-claude-prompt.md"
-RUNNER_FILE="${TRANSCRIPTION_DIR}/run-slack-call-summary-claude.zsh"
 LOG_FILE="${TRANSCRIPTION_DIR}/slack-call-summary-claude.log"
 
 # Who receives the summary DM. Leave empty to DM yourself, or set a Slack
@@ -46,10 +45,6 @@ LOG_FILE="${TRANSCRIPTION_DIR}/slack-call-summary-claude.log"
 # but note Tuple launches triggers outside your shell, so edit this line
 # unless you set the variable with `launchctl setenv`.)
 SLACK_RECIPIENT="${SLACK_RECIPIENT:-}"
-
-TRIGGER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-WATCHER_SRC="${TRIGGER_DIR}/tuple-call-watcher.py"
-WATCHER_DST="${TRANSCRIPTION_DIR}/tuple-call-watcher.py"
 
 if [ -f "${PID_FILE}" ]; then
     if kill -0 "$(cat "${PID_FILE}" 2>/dev/null)" 2>/dev/null; then
@@ -60,20 +55,10 @@ if [ -f "${PID_FILE}" ]; then
 fi
 # Claim the pid file atomically (noclobber) so a double-fired event can't
 # launch two summaries — the loser of the race exits here. The winner
-# replaces this placeholder with the long-lived runner pid after launch.
+# replaces this placeholder with the long-lived harness pid after launch.
 if ! ( set -o noclobber; echo "$$" > "${PID_FILE}" ) 2>/dev/null; then
     echo "slack-call-summary-claude: another invocation just claimed ${TRANSCRIPTION_DIR}"
     exit 0
-fi
-
-# Ship the fixed transcript watcher so the summary reads the backlog
-# deterministically via --catchup instead of hand-reading the JSONL files.
-if [ -f "${WATCHER_SRC}" ]; then
-    cp "${WATCHER_SRC}" "${WATCHER_DST}"
-    chmod 0755 "${WATCHER_DST}"
-else
-    echo "slack-call-summary-claude: watcher not found at ${WATCHER_SRC}" >&2
-    exit 1
 fi
 
 {
@@ -89,8 +74,6 @@ PROMPT
     printf -- '- Inferred call id: %s\n' "${CALL_ID}"
     cat <<'PROMPT'
 
-The current directory should contain `events.jsonl` and `transcriptions.jsonl`, one JSON record per line.
-
 ## File schemas
 
 | File | Fields | Notes |
@@ -100,18 +83,16 @@ The current directory should contain `events.jsonl` and `transcriptions.jsonl`, 
 
 If a field looks unfamiliar, inspect a few records and adapt rather than assuming.
 
-## How to read the transcript
+## Where the transcript lives
 
-Tuple ships a fixed watcher script in this directory. Read the whole call by running it once in catch-up mode:
+This trigger fires when one transcription set completes, and its records live in two files (one JSON record per line). Read them both:
 
-    ./tuple-call-watcher.py --catchup
+PROMPT
+    printf -- '- `%s/events.jsonl`\n' "${TRANSCRIPTION_DIR}"
+    printf -- '- `%s/transcriptions.jsonl`\n' "${TRANSCRIPTION_DIR}"
+    cat <<'PROMPT'
 
-It prints every record across all of this call's session directories (including any mid-call restarts) as tagged lines:
-
-    T|<session-dir>|<json-record>   a transcriptions.jsonl record
-    E|<session-dir>|<json-record>   an events.jsonl record
-
-Parse the `<json-record>` portion of each. Build a speaker map from `user_joined` events; the watcher already drops the noisy `user_audio_started`/`user_audio_stopped` events. Use timestamps when they help anchor decisions, action items, or follow-up questions. If the watcher fails or prints nothing, fall back to reading `events.jsonl` and `transcriptions.jsonl` directly; if the files are absent or empty too, treat the transcript as empty.
+A file may be missing or empty — that's fine. Merge the records in timestamp order. Build a speaker map from `user_joined` events, and ignore the noisy `user_audio_started`/`user_audio_stopped` events. Use timestamps when they help anchor decisions, action items, or follow-up questions. If both files are absent or empty, treat the transcript as empty.
 
 ## Compose the summary
 
@@ -152,38 +133,23 @@ If the Slack tools are unavailable or every send attempt fails, write the compos
 PROMPT
 } > "${PROMPT_FILE}"
 
-cat > "${RUNNER_FILE}" <<'SCRIPT'
-#!/bin/zsh -l
-SCRIPT_DIR="${0:A:h}"
-cd "${SCRIPT_DIR}" || exit 1
-
-if ! command -v claude >/dev/null 2>&1; then
-    echo "slack-call-summary-claude: claude not found on login-shell PATH"
-    exit 127
-fi
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "slack-call-summary-claude: python3 not found on login-shell PATH"
-    exit 127
-fi
-
-# mcp__claude_ai_Slack pre-allows the claude.ai Slack connector so the send
-# works out of the box. Allow rules can't glob server names, but they merge
-# with your own Claude Code permission settings — any other Slack MCP works
-# as long as its tools are allowed there (or its mcp__<server> rule is added
-# below).
-exec claude -p \
-    --allowed-tools "Read" "Write(slack-call-summary-claude-failed.md)" "Bash(./tuple-call-watcher.py:*)" "Bash(python3 tuple-call-watcher.py:*)" "mcp__claude_ai_Slack" \
-    -- "$(cat "${SCRIPT_DIR}/slack-call-summary-claude-prompt.md")"
-SCRIPT
-
-chmod 0755 "${RUNNER_FILE}"
-
 if [ "${SLACK_CALL_SUMMARY_CLAUDE_DRY_RUN:-}" = "1" ]; then
-    echo "slack-call-summary-claude: dry run generated ${RUNNER_FILE}"
+    rm -f "${PID_FILE}"
+    echo "slack-call-summary-claude: dry run generated ${PROMPT_FILE}"
     exit 0
 fi
 
-nohup "${RUNNER_FILE}" >> "${LOG_FILE}" 2>&1 &
+# A login zsh resolves claude from the user's normal PATH (Tuple's trigger
+# host doesn't have it), and the prompt arrives on stdin. mcp__claude_ai_Slack
+# pre-allows the claude.ai Slack connector so the send works out of the box;
+# allow rules can't glob server names, but they merge with your own Claude
+# Code permission settings, so any other Slack MCP works as long as its tools
+# are allowed there (or its mcp__<server> rule is added below).
+nohup /bin/zsh -lc '
+    cd "$1" || exit 1
+    command -v claude >/dev/null 2>&1 || { echo "slack-call-summary-claude: claude not found on login-shell PATH"; exit 127; }
+    exec claude -p --allowed-tools "Read" "Write(slack-call-summary-claude-failed.md)" "mcp__claude_ai_Slack"
+' zsh "${TRANSCRIPTION_DIR}" < "${PROMPT_FILE}" >> "${LOG_FILE}" 2>&1 &
 echo "$!" > "${PID_FILE}"
 disown
 echo "slack-call-summary-claude: launched headless summary (pid $(cat "${PID_FILE}")) for ${TRANSCRIPTION_DIR}"
