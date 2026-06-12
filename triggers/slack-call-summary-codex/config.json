@@ -1,0 +1,7 @@
+{
+  "name": "Slack Call Summary - Codex",
+  "description": "Headlessly runs Codex when Tuple transcription completes and sends a summary of the call to you as a Slack DM.",
+  "category": "Call Summary",
+  "platforms": ["macos"],
+  "language": "bash"
+}
