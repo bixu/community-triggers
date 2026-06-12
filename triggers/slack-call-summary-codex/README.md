@@ -9,7 +9,7 @@ Unlike the interactive `call-summary-codex` trigger, this one runs entirely in t
 - macOS
 - [Codex](https://developers.openai.com/codex/cli/) installed so `codex` works in a new terminal
 - `python3` (the bundled watcher needs it; install with `xcode-select --install`)
-- The Slack app connector enabled in Codex — sign in to the OpenAI-curated Slack plugin so `codex` has `slack_send_message` available
+- A Slack connector available to Codex with a `slack_send_message` tool. The OpenAI-curated Slack plugin works out of the box — enable it and sign in so `codex` has the Slack tools available.
 - Tuple transcription enabled for the call
 
 ## Installation

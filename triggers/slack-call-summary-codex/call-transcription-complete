@@ -136,7 +136,7 @@ If the transcript is empty or too sparse to summarize, the message becomes a one
 
 ## Deliver to Slack
 
-Send the composed message using your Slack connector tools (the slack_send_message tool from the Slack app connector; use slack_search_users / slack_search_channels first if you need to resolve the recipient).
+Send the composed message using your Slack tools — typically a `slack_send_message` tool from whatever Slack connector you have. Use your Slack user/channel search tools first if you need to resolve the recipient.
 
 PROMPT
     if [ -n "${SLACK_RECIPIENT}" ]; then

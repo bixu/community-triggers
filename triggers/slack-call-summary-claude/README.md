@@ -9,7 +9,7 @@ Unlike the interactive `call-summary-claude` trigger, this one runs entirely in 
 - macOS
 - [Claude Code](https://claude.com/claude-code) installed so `claude` works in a new terminal
 - `python3` (the bundled watcher needs it; install with `xcode-select --install`)
-- The **claude.ai Slack connector** enabled in Claude Code. Verify it with `claude mcp list` — you should see `claude.ai Slack: Connected`. Connect it from [claude.ai](https://claude.ai) → Settings → Connectors, or run `/mcp` inside Claude Code.
+- A Slack MCP server or connector available to Claude Code. The **claude.ai Slack connector** works out of the box — verify it with `claude mcp list` (you should see `claude.ai Slack: Connected`); connect it from [claude.ai](https://claude.ai) → Settings → Connectors, or run `/mcp` inside Claude Code. Any other Slack MCP works too, as long as its tools are allowed in your Claude Code permission settings (or you add its `mcp__<server>` rule to the allowlist in the runner — allow rules can't glob server names).
 - Tuple transcription enabled for the call
 
 ## Installation
