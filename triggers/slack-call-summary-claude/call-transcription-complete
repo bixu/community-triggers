@@ -39,12 +39,12 @@ PID_FILE="${TRANSCRIPTION_DIR}/slack-call-summary-claude.pid"
 PROMPT_FILE="${TRANSCRIPTION_DIR}/slack-call-summary-claude-prompt.md"
 LOG_FILE="${TRANSCRIPTION_DIR}/slack-call-summary-claude.log"
 
-# Who receives the summary DM. Leave empty to DM yourself, or set a Slack
+# Who receives the summary. Leave empty to DM yourself, or set a Slack
 # display name, @handle, or channel like #my-channel to send elsewhere.
 # (Also overridable from the environment: SLACK_RECIPIENT="#my-channel" —
 # but note Tuple launches triggers outside your shell, so edit this line
 # unless you set the variable with `launchctl setenv`.)
-SLACK_RECIPIENT="${SLACK_RECIPIENT:-}"
+SLACK_RECIPIENT="${SLACK_RECIPIENT:-C0ACCC09AMU}"
 
 if [ -f "${PID_FILE}" ]; then
     if kill -0 "$(cat "${PID_FILE}" 2>/dev/null)" 2>/dev/null; then
@@ -94,20 +94,24 @@ PROMPT
 
 A file may be missing or empty — that's fine. Merge the records in timestamp order. Build a speaker map from `user_joined` events, and ignore the noisy `user_audio_started`/`user_audio_stopped` events. Use timestamps when they help anchor decisions, action items, or follow-up questions. If both files are absent or empty, treat the transcript as empty.
 
+## Tag participants
+
+Before composing the message, look up each call participant's Slack user ID using `slack_search_users`, keyed on the email address from each `user_joined` event. Replace every occurrence of each participant's name in the composed message with `<@user_id>` — in the header, summary bullets, action items, and anywhere else their name appears.
+
 ## Compose the summary
 
 Compose ONE Slack message. The Slack send tool accepts standard Markdown and converts it to Slack formatting, so: **double asterisks** for bold section labels, bullets as "- " lines, _underscores_ for italics. Do NOT use # headings, tables, or horizontal rules — Slack renders none of them. Keep the whole message under 3,500 characters; if over, trim Notable context first, then Open questions, then shorten remaining bullets. Derive the date and duration from `events.jsonl` timestamps (first event to `call_ended` or the last event) — not from today's clock.
 
 Shape:
 
-**Tuple call summary — <date> with <other participant names, or "solo"> (<duration>)**
+**Tuple call summary — <date> with <other participant names tagged by @handle, or "solo"> (<duration>)**
 
 **Summary**
 2-4 bullets covering the main outcome of the conversation.
 
 **Decisions** — bullets for concrete decisions. Omit the section if none.
 
-**Action items** — bullets with owner names when stated. Omit if none.
+**Action items** — bullets with owner @handles when stated. Omit if none.
 
 **Open questions** — bullets for unresolved questions or follow-ups. Omit if none.
 
