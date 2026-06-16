@@ -100,9 +100,15 @@ Before composing the message, look up each call participant's Slack user ID usin
 
 ## Compose the summary
 
-Compose ONE Slack message. The Slack send tool accepts standard Markdown and converts it to Slack formatting, so: **double asterisks** for bold section labels, bullets as "- " lines, _underscores_ for italics. Do NOT use # headings, tables, or horizontal rules — Slack renders none of them. Keep the whole message under 3,500 characters; if over, trim Notable context first, then Open questions, then shorten remaining bullets. Derive the date and duration from `events.jsonl` timestamps (first event to `call_ended` or the last event) — not from today's clock.
+Compose two pieces: a title and a body.
 
-Shape:
+**Title** — one line, used as the parent message:
+
+**[ :tuple: Summary: <dominant topic of the call> ]**
+
+**Body** — posted as a draft threaded reply under the title. The Slack send tool accepts standard Markdown: **double asterisks** for bold section labels, bullets as "- " lines, _underscores_ for italics. Do NOT use # headings, tables, or horizontal rules. Keep the body under 3,500 characters; if over, trim Notable context first, then Open questions, then shorten remaining bullets. Derive the date and duration from `events.jsonl` timestamps (first event to `call_ended` or the last event) — not from today's clock.
+
+Body shape:
 
 **Tuple call summary — <date> with <other participant names tagged by @handle, or "solo"> (<duration>)**
 
@@ -117,23 +123,27 @@ Shape:
 
 **Notable context** — only details that would help the user remember the call later. Omit if nothing useful.
 
-If the transcript is empty or too sparse to summarize, the message becomes a one-liner saying the transcription for the call at <date/time> was empty or too sparse to summarize, plus which files you found. Still send it — silent failure is worse than a thin message.
+If the transcript is empty or too sparse to summarize, set the body to a one-liner saying the transcription for the call at <date/time> was empty or too sparse to summarize, plus which files you found.
 
 ## Deliver to Slack
 
-Send the composed message using your Slack tools — typically a `slack_send_message` tool from whatever Slack MCP server or connector you have. Use your Slack user/channel search tools first if you need to resolve the recipient.
+Use your Slack tools to deliver in two steps. Resolve the recipient first if needed.
 
 PROMPT
     if [ -n "${SLACK_RECIPIENT}" ]; then
-        printf 'Send it to: %s\n' "${SLACK_RECIPIENT}"
+        printf 'Recipient: %s\n' "${SLACK_RECIPIENT}"
     else
-        printf 'Send it as a direct message to yourself — the authenticated Slack user (your own DM).\n'
+        printf 'Recipient: yourself — the authenticated Slack user (your own DM).\n'
     fi
     cat <<'PROMPT'
 
-Send exactly one message. Do not post to any public channel unless that is the configured recipient. If the recipient cannot be resolved to an unambiguous match, treat that as a delivery failure rather than guessing. After a successful send, print the message timestamp/permalink and stop.
+Step 1: Send the title as a live message (`slack_send_message`) to the recipient. Capture the returned message timestamp (`thread_ts`).
 
-If the Slack tools are unavailable or every send attempt fails, write the composed message to slack-call-summary-claude-failed.md in the current directory, print the error, and exit — do not pretend it was delivered.
+Step 2: Post the body as a draft threaded reply (`slack_send_message_draft`) with `thread_ts` set to the timestamp from step 1. This lets the user review and edit the body in Slack before sending.
+
+If the recipient cannot be resolved to an unambiguous match, treat that as a delivery failure rather than guessing.
+
+If the Slack tools are unavailable or delivery fails, write both the title and body to slack-call-summary-claude-failed.md in the current directory, print the error, and exit — do not pretend it was delivered.
 PROMPT
 } > "${PROMPT_FILE}"
 
