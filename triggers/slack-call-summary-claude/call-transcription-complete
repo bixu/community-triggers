@@ -44,7 +44,7 @@ LOG_FILE="${TRANSCRIPTION_DIR}/slack-call-summary-claude.log"
 # (Also overridable from the environment: SLACK_RECIPIENT="#my-channel" —
 # but note Tuple launches triggers outside your shell, so edit this line
 # unless you set the variable with `launchctl setenv`.)
-SLACK_RECIPIENT="${SLACK_RECIPIENT:-C0ACCC09AMU}"
+SLACK_RECIPIENT="${SLACK_RECIPIENT:-}"
 
 if [ -f "${PID_FILE}" ]; then
     if kill -0 "$(cat "${PID_FILE}" 2>/dev/null)" 2>/dev/null; then
